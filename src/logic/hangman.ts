@@ -32,7 +32,7 @@ export type RoundStatus = 'choosing' | 'guessing' | 'won' | 'lost' | 'abandoned'
 
 export interface GuessEvent {
   seq: number;
-  kind: 'letter' | 'word';
+  kind: 'letter' | 'word' | 'pass';
   value: string;
   byId: string;
   byName: string;
@@ -204,6 +204,14 @@ export function applyWordGuess(
   next.lastEvent = event(round, 'word', guess, byId, byName, hit);
   finish(next, word, round.chooserId, points);
   return { round: next, points, ignored: false };
+}
+
+/** The guesser whose turn it is gives it up. Costs nothing; the caller moves the turn on. */
+export function applyPass(round: RoundState, byId: string, byName: string): GuessResult {
+  if (round.status !== 'guessing' || round.turnId === null || round.turnId !== byId) {
+    return { round, points: {}, ignored: true };
+  }
+  return { round: { ...round, lastEvent: event(round, 'pass', '', byId, byName, false) }, points: {}, ignored: false };
 }
 
 function event(

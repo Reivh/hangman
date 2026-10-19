@@ -8,10 +8,11 @@ Multiplayer Hangman for friends, in the browser or on a phone. Built with **Phas
    Anyone joining after the game has launched gets a short join screen to pick a name and icon (the same
    default Multiavatar icons Playroom uses). They're counted as a player once they've picked.
 2. The host taps **Start game**. Players take turns being the **word picker** (rotating each round).
+   If a round gets stuck, the host can end it with **End round** (top right; asks first).
 3. The picker types a secret word or short phrase. Only they can see it.
 4. Everyone else guesses letters (tap the on-screen keys or use a keyboard). With **2 or more guessers it's
    turn-based**: one guess each (letter or whole word), then the turn passes on, whether it was right or wrong.
-   The picker can skip someone's turn if they've wandered off. With a single guesser there are no turns.
+   You can **Pass** your turn (no penalty), and the picker can skip someone's turn if they've wandered off. With a single guesser there are no turns.
    Every wrong letter adds a part: base, pole, beam, brace, rope, head, body, arms, legs. That's **11 misses**.
 5. Guessers win if they reveal the word before the man is hung. You can also guess the whole word, but a wrong guess costs a part.
 

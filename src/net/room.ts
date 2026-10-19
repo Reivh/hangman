@@ -19,6 +19,7 @@ import {
 } from 'playroomkit';
 import {
   applyLetter,
+  applyPass,
   applyWordGuess,
   beginGuessing,
   canGuess,
@@ -36,7 +37,7 @@ export interface Player {
 
 export const MAX_NAME_LENGTH = 16;
 
-type GuessPayload = { kind: 'letter' | 'word'; value: string };
+type GuessPayload = { kind: 'letter' | 'word' | 'pass'; value: string };
 
 const players = new Map<string, PlayerState>();
 let secret: { roundId: number; word: string } | null = null;
@@ -219,10 +220,11 @@ function handleGuess(payload: GuessPayload, sender: PlayerState): void {
   const word = mySecret();
   if (!r || !word || r.status !== 'guessing' || !isJoined(sender)) return;
   const name = displayName(sender);
-  const result: GuessResult =
-    payload.kind === 'letter'
-      ? applyLetter(r, word, String(payload.value), sender.id, name)
-      : applyWordGuess(r, word, String(payload.value), sender.id, name);
+  const value = String(payload.value);
+  let result: GuessResult;
+  if (payload.kind === 'pass') result = applyPass(r, sender.id, name);
+  else if (payload.kind === 'word') result = applyWordGuess(r, word, value, sender.id, name);
+  else result = applyLetter(r, word, value, sender.id, name);
   if (result.ignored) return;
   setState('round', syncTurn(result.round, joinedIds(), true), true);
   const s = { ...scores() };

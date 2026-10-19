@@ -3,6 +3,7 @@ import {
   MAX_WORD_LENGTH,
   MAX_WRONG,
   applyLetter,
+  applyPass,
   applyWordGuess,
   beginGuessing,
   mask,
@@ -110,6 +111,16 @@ describe('turns', () => {
     expect(applyLetter(r, 'CAT', 'C', 'p2', 'Bo').ignored).toBe(true);
     expect(applyWordGuess(r, 'CAT', 'CAT', 'p2', 'Bo').ignored).toBe(true);
     expect(applyLetter(r, 'CAT', 'C', 'p1', 'Ann').ignored).toBe(false);
+  });
+
+  it('lets only the current guesser pass, at no cost', () => {
+    const r = syncTurn(start('CAT'), guessers, false);
+    expect(applyPass(r, 'p2', 'Bo').ignored).toBe(true);
+    const res = applyPass(r, 'p1', 'Ann');
+    expect(res.ignored).toBe(false);
+    expect(res.round.wrong).toBe(0);
+    expect(res.round.lastEvent).toMatchObject({ kind: 'pass', byId: 'p1' });
+    expect(applyPass(start('CAT'), 'p1', 'Ann').ignored).toBe(true); // No turns, nothing to pass.
   });
 
   it('moves on when the current guesser leaves, and goes free-for-all below 2 guessers', () => {
