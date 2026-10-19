@@ -41,8 +41,11 @@ Optional: register the game at <https://dev.joinplayroom.com> and put its id in 
 
 ## Deploying
 
-`npm run build` creates a static site in `dist/` (relative paths), which you can host anywhere: Netlify, Vercel,
-GitHub Pages, itch.io, etc. Playroom handles the multiplayer networking, so you don't need your own server.
+The game is published to **GitHub Pages** at <https://reivh.github.io/hangman/>. Every push to `main` runs the tests,
+builds, and redeploys (`.github/workflows/pages.yml`).
+
+`npm run build` creates a static site in `dist/` (relative paths), so it can also be hosted anywhere else
+(Netlify, Vercel, itch.io…). Playroom handles the multiplayer networking, so there's no server to run.
 
 ## Layout
 
