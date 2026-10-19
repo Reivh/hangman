@@ -45,8 +45,12 @@ variable; for local production builds, put it in `.env.production.local` (see `.
 
 ## Deploying
 
-The game is published to **GitHub Pages** at <https://reivh.github.io/hangman/>. Every push to `main` runs the tests,
-builds, and redeploys (`.github/workflows/pages.yml`).
+The game is published to **GitHub Pages** at <https://reivh.github.io/hangman/>.
+
+- Work happens on **`develop`**. Pushes there (and pull requests) are type-checked, tested and built by CI, but
+  not deployed.
+- **`main`** is the live game: merging `develop` into `main` runs the tests, builds, and redeploys
+  (`.github/workflows/pages.yml`).
 
 `npm run build` creates a static site in `dist/` (relative paths), so it can also be hosted anywhere else
 (Netlify, Vercel, itch.io…). Playroom handles the multiplayer networking, so there's no server to run.

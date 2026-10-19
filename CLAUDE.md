@@ -12,8 +12,14 @@ npm test        # unit tests (vitest)
 npm run build   # type-check + production build into dist/
 ```
 
-Run `npx tsc` and `npm test` before committing. Pushing to `main` redeploys the live site via
-`.github/workflows/pages.yml`.
+Run `npx tsc` and `npm test` before committing.
+
+## Branches
+
+- **`develop`** is the working branch: commit and push day-to-day work here. CI (`.github/workflows/ci.yml`)
+  type-checks, tests and builds it, but nothing is deployed.
+- **`main`** is the live game. Every push to `main` redeploys GitHub Pages (`.github/workflows/pages.yml`),
+  so only merge `develop` into `main` when asked to release, and never commit to `main` directly.
 
 ## Architecture rules
 
