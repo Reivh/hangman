@@ -1,0 +1,50 @@
+# The Hangman
+
+Multiplayer Hangman for friends, in the browser or on a phone. Built with **Phaser 4**, **Playroom Kit** and **TypeScript** (Vite).
+
+## How to play
+
+1. One person opens the game and gets a room. Others join via the room code / QR code / invite link.
+2. The host taps **Start game**. Players take turns being the **word picker** (rotating each round).
+3. The picker types a secret word or short phrase. Only they can see it.
+4. Everyone else guesses letters together (tap the on-screen keys or use a keyboard).
+   Every wrong letter adds a part: base, pole, beam, brace, rope, head, body, arms, legs. That's **11 misses**.
+5. Guessers win if they reveal the word before the man is hung. You can also guess the whole word, but a wrong guess costs a part.
+
+**Scoring:** +1 for each letter you reveal, +3 for solving it, and the picker gets +3 if he hangs.
+The host can turn on **Danish letters (ÆØÅ)** in the lobby.
+
+### Keeping the word secret
+
+Playroom's shared state is visible to every client, so the word is **never** put there. It stays only in the
+picker's browser. Guesses are sent by RPC, and the picker's client checks them and publishes just the masked word
+(`_ A N _`). The full word is only shared once the round ends. If the picker leaves, the host's client ends the round.
+
+## Development
+
+```bash
+npm install
+npm run dev        # http://localhost:5173, also on your LAN IP so phones on the same Wi-Fi can join
+npm test           # rules unit tests (vitest)
+npm run build      # type-check + production build into dist/
+```
+
+Dev-only shortcut: `http://localhost:5173/?skiplobby` skips Playroom's lobby screen.
+
+Optional: register the game at <https://dev.joinplayroom.com> and put its id in `.env.local` as
+`VITE_PLAYROOM_GAME_ID=...` (see `.env.example`).
+
+## Deploying
+
+`npm run build` creates a static site in `dist/` (relative paths), which you can host anywhere: Netlify, Vercel,
+GitHub Pages, itch.io, etc. Playroom handles the multiplayer networking, so you don't need your own server.
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `src/logic/hangman.ts` | Pure rules: normalising words, masking, applying guesses, win/lose, points |
+| `src/net/room.ts` | Playroom glue: lobby, shared state, RPC, who's allowed to do what |
+| `src/scenes/GameScene.ts` | Phaser scene: renders lobby / choosing / guessing / results |
+| `src/draw/gallows.ts` | The gallows drawing (dotted outline, filled in on each miss) |
+| `src/ui/prompt.ts` | HTML input dialog (native phone keyboard) for words |
