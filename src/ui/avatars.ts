@@ -6,7 +6,7 @@ const randomSeed = (): string => Math.random().toString(36).slice(2, 12);
 
 export function randomAvatar(): string {
   const svg = multiavatar(randomSeed());
-  return 'data:image/svg+xml,' + encodeURIComponent(svg).replace(/'/g, '%27').replace(/"/g, '%22');
+  return 'data:image/svg+xml,' + encodeURIComponent(svg).replace(/'/g, '%27');
 }
 
 export function randomAvatars(count: number): string[] {

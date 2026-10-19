@@ -40,6 +40,10 @@ Run `npx tsc` and `npm test` before committing. Pushing to `main` redeploys the 
 - Merely loading the Playroom module reports a visit, so `src/main.ts` shows a start screen and only imports
   the game (and Playroom) after Play is tapped. Don't add static imports of Playroom to the entry chunk.
 - `getParticipants()` returns an array at runtime despite its `Record` type; read ids from the players.
+- Don't call `getProfile()` on other players: it converts their colour and throws if a client wrote a
+  non-string. Read the raw `profile` state and validate each field (see `src/net/room.ts`).
+- A player who reloads keeps the same id; the host waits a grace period before ending the round of a
+  word picker who dropped out.
 - Playroom's lobby only runs before launch; late joiners get our own join screen (`src/ui/join.ts`).
 
 ## Testing in a browser

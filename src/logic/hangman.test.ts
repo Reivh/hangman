@@ -8,6 +8,7 @@ import {
   beginGuessing,
   mask,
   newRound,
+  nextInOrder,
   normalizeWord,
   syncTurn,
 } from './hangman';
@@ -123,9 +124,35 @@ describe('turns', () => {
     expect(applyPass(start('CAT'), 'p1', 'Ann').ignored).toBe(true); // No turns, nothing to pass.
   });
 
-  it('moves on when the current guesser leaves, and goes free-for-all below 2 guessers', () => {
+  it('goes free-for-all below 2 guessers', () => {
     const r = syncTurn(start('CAT'), guessers, false);
-    expect(syncTurn(r, ['chooser', 'p2', 'p3'], false).turnId).toBe('p2');
     expect(syncTurn(r, ['chooser', 'p3'], false).turnId).toBeNull();
+  });
+
+  it('gives a departed guesser’s turn to whoever came after them, not back to the first', () => {
+    const order = ['chooser', 'p1', 'p2', 'p3', 'p4'];
+    const r = { ...start('CAT'), turnId: 'p3' };
+    expect(syncTurn(r, ['chooser', 'p1', 'p2', 'p4'], false, order).turnId).toBe('p4');
+    // Wraps round: the last guesser left, so the first goes next.
+    const last = { ...start('CAT'), turnId: 'p4' };
+    expect(syncTurn(last, ['chooser', 'p1', 'p2', 'p3'], false, order).turnId).toBe('p1');
+  });
+});
+
+describe('nextInOrder', () => {
+  const order = ['a', 'b', 'c', 'd'];
+  it('picks the next present player after the given one, wrapping round', () => {
+    expect(nextInOrder(order, ['a', 'b', 'c', 'd'], 'b')).toBe('c');
+    expect(nextInOrder(order, ['a', 'b', 'c', 'd'], 'd')).toBe('a');
+  });
+  it('skips players who have left, remembering where the missing one sat', () => {
+    expect(nextInOrder(order, ['a', 'd'], 'b')).toBe('d');
+  });
+  it('starts with the first present player when there is no previous one', () => {
+    expect(nextInOrder(order, ['c', 'd'], null)).toBe('c');
+    expect(nextInOrder(order, [], 'a')).toBeUndefined();
+  });
+  it('puts players missing from the order at the end', () => {
+    expect(nextInOrder(['a'], ['a', 'z'], 'a')).toBe('z');
   });
 });

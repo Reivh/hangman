@@ -25,6 +25,7 @@ import {
   canGuess,
   MAX_WORD_LENGTH,
   newRound,
+  nextInOrder,
   syncTurn,
   type GuessResult,
   type RoundState,
@@ -44,8 +45,16 @@ export const MAX_NAME_LENGTH = 16;
 type GuessPayload = { kind: 'letter' | 'word' | 'pass'; value: string };
 
 const players = new Map<string, PlayerState>();
-let secret: { roundId: number; word: string } | null = null;
+/** Everyone seen this session, in join order, including players who have since left. */
+const joinOrder: string[] = [];
+/** Last known display names, so a player who dropped out can still be named. */
+const knownNames = new Map<string, string>();
+/** word is null when this device has no copy of the round's word (cached so storage isn't re-read). */
+let secret: { roundId: number; word: string | null } | null = null;
 
+/** How long the word picker may be gone (e.g. reloading the page) before the host ends the round. */
+const CHOOSER_GRACE_MS = 30_000;
+let chooserGoneSince: number | null = null;
 
 /**
  * Joins (or creates) the room. Resolves to true when this player still has to pick a name and icon:
@@ -56,7 +65,7 @@ export async function connect(): Promise<boolean> {
   // dev/testing sessions (each test browser is a "new" user) would use them up. Without it, Playroom
   // runs in dev mode.
   const gameId = import.meta.env.PROD ? (import.meta.env.VITE_PLAYROOM_GAME_ID as string | undefined) : undefined;
-  await insertCoin({
+  await insertCoinOrFail({
     skipLobby,
     maxPlayersPerRoom: 12,
     defaultStates: { round: null, scores: {}, danish: false },
@@ -65,6 +74,7 @@ export async function connect(): Promise<boolean> {
 
   onPlayerJoin((player) => {
     players.set(player.id, player);
+    if (!joinOrder.includes(player.id)) joinOrder.push(player.id);
     player.onQuit(() => players.delete(player.id));
   });
 
@@ -90,10 +100,17 @@ export async function connect(): Promise<boolean> {
   return !sawLobby;
 }
 
+/** insertCoin, but also rejecting when Playroom reports an error through its callback. */
+function insertCoinOrFail(options: Parameters<typeof insertCoin>[0]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    insertCoin(options, undefined, reject).then(resolve, reject);
+  });
+}
+
 /** Name and icon from Playroom's profile, used to prefill the join screen. */
 export function myProfile(): { name: string; photo: string } {
-  const profile = myPlayer().getProfile();
-  return { name: (profile?.name ?? '').slice(0, MAX_NAME_LENGTH), photo: safePhoto(profile?.photo) };
+  const { name, photo } = rawProfile(myPlayer());
+  return { name: typeof name === 'string' ? name.slice(0, MAX_NAME_LENGTH) : '', photo: safePhoto(photo) };
 }
 
 export function joinGame(name: string, photo: string): void {
@@ -127,10 +144,26 @@ function safePhoto(photo: unknown): string {
     : '';
 }
 
-/** Names from Playroom's lobby aren't length-limited, so cap them for display. */
+/**
+ * A player's raw profile state. Profiles are written by each player's own browser, so we don't use
+ * Playroom's getProfile(): it converts the colour and throws if that isn't a string.
+ */
+function rawProfile(p: PlayerState): Record<string, unknown> {
+  const profile: unknown = p.getState('profile');
+  return typeof profile === 'object' && profile !== null ? (profile as Record<string, unknown>) : {};
+}
+
+/** Anything that isn't a sensible string is ignored. */
 function displayName(p: PlayerState): string {
-  const name = p.getProfile()?.name || 'Player';
+  const raw = rawProfile(p).name;
+  const name = typeof raw === 'string' && raw.trim() ? raw.trim() : 'Player';
+  // Names from Playroom's lobby aren't length-limited, so cap them for display.
   return name.length > MAX_NAME_LENGTH ? name.slice(0, MAX_NAME_LENGTH - 1) + '…' : name;
+}
+
+function displayColor(p: PlayerState): string {
+  const raw = rawProfile(p).color;
+  return typeof raw === 'string' && /^#[0-9a-f]{6}$/i.test(raw) ? raw : '#888888';
 }
 
 type Roster = { joined: Player[]; joining: number };
@@ -144,11 +177,12 @@ function currentRoster(): Roster {
       joined: all.filter(isJoined).map((p) => ({
         id: p.id,
         name: displayName(p),
-        color: p.getProfile()?.color?.hexString ?? '#222',
-        photo: safePhoto(p.getProfile()?.photo),
+        color: displayColor(p),
+        photo: safePhoto(rawProfile(p).photo),
       })),
       joining: all.filter((p) => !isJoined(p)).length,
     };
+    for (const p of roster.joined) knownNames.set(p.id, p.name);
     queueMicrotask(() => (roster = null));
   }
   return roster;
@@ -163,18 +197,18 @@ export const joiningCount = (): number => currentRoster().joining;
 const joinedIds = (): string[] => playerList().map((p) => p.id);
 
 export function playerName(id: string): string {
-  return playerList().find((p) => p.id === id)?.name ?? 'Someone';
+  return playerList().find((p) => p.id === id)?.name ?? knownNames.get(id) ?? 'Someone';
 }
+
+/** Whether a player is currently connected (they may be reloading the page). */
+export const isConnected = (id: string): boolean => players.has(id);
 
 /** The secret, but only if I'm the chooser of the current round. */
 export function mySecret(): string | null {
   const r = round();
   if (!r || r.chooserId !== me()) return null;
-  if (secret?.roundId !== r.id) {
-    const stored = storage('get', secretKey(r.id));
-    secret = stored ? { roundId: r.id, word: stored } : null;
-  }
-  return secret?.word ?? null;
+  if (secret?.roundId !== r.id) secret = { roundId: r.id, word: storage('get', secretKey(r.id)) };
+  return secret.word;
 }
 
 // ---- Host actions ----------------------------------------------------------
@@ -188,9 +222,8 @@ export function startNextRound(): void {
   const ids = joinedIds();
   if (ids.length < 2) return;
   const prev = round();
-  // Rotate the chooser through players in join order.
-  const prevIndex = prev ? ids.indexOf(prev.chooserId) : -1;
-  const chooserId = ids[(prevIndex + 1) % ids.length];
+  // Rotate the chooser through players in join order, carrying on after the last one even if they left.
+  const chooserId = nextInOrder(joinOrder, ids, prev?.chooserId ?? null) ?? ids[0];
   setState('round', newRound((prev?.id ?? 0) + 1, chooserId, danish()), true);
 }
 
@@ -201,11 +234,20 @@ export function abandonRound(): void {
   setState('round', { ...r, status: 'abandoned', word: mySecret() }, true);
 }
 
-/** Called every frame by the host: end the round if the chooser left. */
+/**
+ * Called every frame by the host: end the round if the chooser left. They get a grace period first,
+ * because reloading the page also drops them for a moment, and they come back with their word.
+ */
 export function hostWatchdog(): void {
   const r = round();
-  if (!amHost() || !r) return;
-  if ((r.status === 'choosing' || r.status === 'guessing') && !players.has(r.chooserId)) {
+  const active = !!r && (r.status === 'choosing' || r.status === 'guessing');
+  if (!amHost() || !r || !active || players.has(r.chooserId)) {
+    chooserGoneSince = null;
+    return;
+  }
+  chooserGoneSince ??= performance.now();
+  if (performance.now() - chooserGoneSince > CHOOSER_GRACE_MS) {
+    chooserGoneSince = null;
     setState('round', { ...r, status: 'abandoned' }, true);
   }
 }
@@ -214,7 +256,7 @@ export function hostWatchdog(): void {
 export function chooserWatchdog(): void {
   const r = round();
   if (!r || r.chooserId !== me() || r.status !== 'guessing') return;
-  const next = syncTurn(r, joinedIds(), false);
+  const next = syncTurn(r, joinedIds(), false, joinOrder);
   if (next !== r) setState('round', next, true);
 }
 
@@ -222,7 +264,7 @@ export function chooserWatchdog(): void {
 export function skipTurn(): void {
   const r = round();
   if (!r || r.status !== 'guessing' || !r.turnId || r.chooserId !== me()) return;
-  setState('round', syncTurn(r, joinedIds(), true), true);
+  setState('round', syncTurn(r, joinedIds(), true, joinOrder), true);
 }
 
 // ---- Chooser actions -------------------------------------------------------
@@ -232,7 +274,7 @@ export function submitSecret(word: string): void {
   if (!r || r.status !== 'choosing' || r.chooserId !== me()) return;
   secret = { roundId: r.id, word };
   storage('set', secretKey(r.id), word);
-  setState('round', syncTurn(beginGuessing(r, word), joinedIds(), false), true);
+  setState('round', syncTurn(beginGuessing(r, word), joinedIds(), false, joinOrder), true);
 }
 
 /** RPC payloads come from other players' browsers, so check their shape before using them. */
@@ -258,7 +300,7 @@ function handleGuess(payload: unknown, sender: PlayerState): void {
   else if (payload.kind === 'word') result = applyWordGuess(r, word, value, sender.id, name);
   else result = applyLetter(r, word, value, sender.id, name);
   if (result.ignored) return;
-  setState('round', syncTurn(result.round, joinedIds(), true), true);
+  setState('round', syncTurn(result.round, joinedIds(), true, joinOrder), true);
   const s = { ...scores() };
   for (const [id, pts] of Object.entries(result.points)) s[id] = (s[id] ?? 0) + pts;
   setState('scores', s, true);

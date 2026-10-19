@@ -15,3 +15,16 @@ export function waitForPlay(): Promise<void> {
     };
   });
 }
+
+/** Bring the start card back with an error and a retry button, instead of leaving a blank page. */
+export function showStartError(): void {
+  $('start-text').textContent =
+    "Something went wrong starting the game. Check your internet connection and try again. If it keeps " +
+    'happening, the game may have reached its player limit for today.';
+  const button = $('start-play');
+  button.textContent = 'Try again';
+  button.onclick = () => location.reload();
+  // Cover the game (and Playroom's lobby) if they had already appeared.
+  $('start').style.zIndex = '2147483647';
+  $('start').hidden = false;
+}

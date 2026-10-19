@@ -1,7 +1,7 @@
 // Entry point: shows the start screen first. Playroom and the game are only loaded after Play,
 // since loading Playroom already reports a visit, and visits count towards the daily-user quota.
 import { skipLobby } from './dev';
-import { waitForPlay } from './ui/start';
+import { showStartError, waitForPlay } from './ui/start';
 
 async function loadFonts(): Promise<void> {
   const fonts = ['600 54px "Bodoni Moda"', '34px "Patrick Hand"'].map((f) => document.fonts.load(f));
@@ -18,4 +18,8 @@ async function boot(): Promise<void> {
   await startGame();
 }
 
-boot();
+// The game failed to download (flaky connection) or Playroom reported an error, e.g. the daily-user limit.
+boot().catch((error: unknown) => {
+  console.error(error);
+  showStartError();
+});

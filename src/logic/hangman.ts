@@ -22,6 +22,9 @@ export const ALPHABET_DA = [...ALPHABET_EN, 'Æ', 'Ø', 'Å'];
 export const HIDDEN = '_';
 /** Characters that are shown from the start and never guessed. */
 const SHOWN = new Set([' ', '-', "'"]);
+
+/** Spaces, hyphens and apostrophes are shown from the start and never guessed. */
+export const isShown = (ch: string): boolean => SHOWN.has(ch);
 export const MAX_WORD_LENGTH = 60;
 
 export function alphabet(danish: boolean): string[] {
@@ -106,16 +109,40 @@ export function beginGuessing(round: RoundState, word: string): RoundState {
 export const TURN_BASED_FROM = 2;
 
 /**
- * Make `turnId` match the current guessers: null when there are too few of them or the round is over,
- * otherwise a valid guesser. With `advance`, the turn moves to the next guesser in order.
+ * The first of `present` that comes after `after` in `order` (wrapping round), or the first present one
+ * when `after` is null. `order` may include players who have left, which is how a departed player's
+ * place in the rotation is remembered. Present players missing from `order` go at the end.
  */
-export function syncTurn(round: RoundState, guessers: readonly string[], advance: boolean): RoundState {
+export function nextInOrder(
+  order: readonly string[],
+  present: readonly string[],
+  after: string | null,
+): string | undefined {
+  const full = [...order, ...present.filter((id) => !order.includes(id))];
+  const start = after === null ? -1 : full.indexOf(after);
+  for (let i = 1; i <= full.length; i++) {
+    const id = full[(start + i) % full.length];
+    if (present.includes(id)) return id;
+  }
+  return undefined;
+}
+
+/**
+ * Make `turnId` match the current guessers: null when there are too few of them or the round is over,
+ * otherwise a valid guesser. With `advance`, the turn moves to the next guesser. If the guesser whose
+ * turn it was has left, the turn goes to whoever came after them in `order` (join order).
+ */
+export function syncTurn(
+  round: RoundState,
+  guessers: readonly string[],
+  advance: boolean,
+  order: readonly string[] = guessers,
+): RoundState {
   const ids = guessers.filter((id) => id !== round.chooserId);
   let turnId: string | null = null;
   if (round.status === 'guessing' && ids.length >= TURN_BASED_FROM) {
-    const at = round.turnId ? ids.indexOf(round.turnId) : -1;
-    if (at === -1) turnId = ids[0];
-    else turnId = advance ? ids[(at + 1) % ids.length] : ids[at];
+    const stays = round.turnId !== null && ids.includes(round.turnId) && !advance;
+    turnId = stays ? round.turnId : (nextInOrder(order, ids, round.turnId) ?? null);
   }
   return turnId === round.turnId ? round : { ...round, turnId };
 }

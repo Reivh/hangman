@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import * as net from '../net/room';
 import { GALLOWS_W, drawGallows } from '../draw/gallows';
-import { HIDDEN, MAX_WRONG, alphabet, canGuess, normalizeWord, type RoundState } from '../logic/hangman';
+import { HIDDEN, MAX_WRONG, alphabet, canGuess, isShown, normalizeWord, type RoundState } from '../logic/hangman';
 import { closePrompt, isPromptOpen, openPrompt } from '../ui/prompt';
 import { LINE_SPACING, layoutWord } from './wordLayout';
 
@@ -30,7 +30,8 @@ export class GameScene extends Phaser.Scene {
   private lastSnapshot = '';
   private lastRoundId = -1;
   private lastWrong = 0;
-  private lastSeq = 0;
+  /** Round id + event seq of the last animated event (seq restarts every round). */
+  private lastEventKey = '';
   private autoPromptedRound = -1;
   /** Letters I tapped that the chooser hasn't confirmed yet. */
   private pending = new Set<string>();
@@ -53,10 +54,13 @@ export class GameScene extends Phaser.Scene {
   update(): void {
     net.hostWatchdog();
     net.chooserWatchdog();
+    const round = net.round();
     const snapshot = JSON.stringify([
-      net.round(),
+      round,
       net.scores(),
-      net.playerList(),
+      // Icons can be large data URLs; their length and tail are enough to notice a change.
+      net.playerList().map((p) => [p.id, p.name, p.color, p.photo.length, p.photo.slice(-32)]),
+      round ? net.isConnected(round.chooserId) : true,
       net.joiningCount(),
       net.amHost(),
       net.danish(),
@@ -248,7 +252,7 @@ export class GameScene extends Phaser.Scene {
       [...line.text].forEach((ch, col) => {
         const cx = left + col * slot + slot / 2;
         const under = y + font * 0.6;
-        if (ch !== ' ' && ch !== '-' && ch !== "'") g.lineBetween(cx - slot * 0.38, under, cx + slot * 0.38, under);
+        if (!isShown(ch)) g.lineBetween(cx - slot * 0.38, under, cx + slot * 0.38, under);
         let shown = ch;
         let color = '#111';
         if (ch === HIDDEN) {
@@ -273,13 +277,18 @@ export class GameScene extends Phaser.Scene {
       msg = e.kind === 'pass' ? `${who} passed` : `${who} guessed ${e.value} ${e.hit ? '✓' : '✗'}`;
     } else msg = round.chooserId === net.me() ? 'Waiting for the first guess…' : 'Tap a letter to guess!';
     if (!e && round.status === 'guessing' && round.turnId === net.me()) msg = 'Your turn — tap a letter!';
+    // The host waits a little before ending the round, in case the word picker is just reloading.
+    if (round.status === 'guessing' && !net.isConnected(round.chooserId)) {
+      msg = `Waiting for ${net.playerName(round.chooserId)} to reconnect…`;
+    }
     const t = this.text(WIDTH / 2, 790, msg, {
       fontFamily: HAND,
       fontSize: '28px',
       color: e && !e.hit && e.kind !== 'pass' && round.status === 'guessing' ? RED : '#111',
     });
-    if (e && e.seq !== this.lastSeq) {
-      this.lastSeq = e.seq;
+    const eventKey = e ? `${round.id}:${e.seq}` : '';
+    if (e && eventKey !== this.lastEventKey) {
+      this.lastEventKey = eventKey;
       t.setScale(1.3);
       this.tweens.add({ targets: t, scale: 1, duration: 250, ease: 'Back.Out' });
     }
@@ -463,6 +472,8 @@ export class GameScene extends Phaser.Scene {
     if (!alphabet(round.danish).includes(letter) || round.guessed.includes(letter) || this.pending.has(letter)) return;
     this.pending.add(letter);
     net.guess('letter', letter);
+    // If the word picker never confirms it (e.g. they're briefly offline), make the key tappable again.
+    this.time.delayedCall(4000, () => this.pending.delete(letter));
   }
 
   private promptSecret(round: RoundState): void {
