@@ -29,6 +29,7 @@ import {
   type GuessResult,
   type RoundState,
 } from '../logic/hangman';
+import { skipLobby } from '../dev';
 
 export interface Player {
   id: string;
@@ -45,14 +46,13 @@ type GuessPayload = { kind: 'letter' | 'word' | 'pass'; value: string };
 const players = new Map<string, PlayerState>();
 let secret: { roundId: number; word: string } | null = null;
 
+
 /**
  * Joins (or creates) the room. Resolves to true when this player still has to pick a name and icon:
  * Playroom's lobby only runs before the game launches, so anyone arriving later skips it.
  */
 export async function connect(): Promise<boolean> {
   const gameId = import.meta.env.VITE_PLAYROOM_GAME_ID as string | undefined;
-  // Dev only: ?skiplobby jumps past Playroom's lobby and our join screen (handy for automated testing).
-  const skipLobby = import.meta.env.DEV && new URLSearchParams(location.search).has('skiplobby');
   await insertCoin({
     skipLobby,
     maxPlayersPerRoom: 12,

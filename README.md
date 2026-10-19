@@ -34,7 +34,10 @@ npm test           # rules unit tests (vitest)
 npm run build      # type-check + production build into dist/
 ```
 
-Dev-only shortcut: `http://localhost:5173/?skiplobby` skips Playroom's lobby and the join screen.
+Opening the page shows a start screen; nothing from Playroom loads until **Play** is tapped, so link previews and
+casual visitors don't count towards Playroom's daily-user quota. The page also asks search engines not to index it.
+
+Dev-only shortcut: `http://localhost:5173/?skiplobby` skips the start screen, Playroom's lobby and the join screen.
 
 Optional: register the game at <https://dev.joinplayroom.com> and put its id in `.env.local` as
 `VITE_PLAYROOM_GAME_ID=...` (see `.env.example`).

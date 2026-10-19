@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#5f6261" />
+    <!-- Keep the page out of search results: every visitor counts towards the Playroom quota. -->
+    <meta name="robots" content="noindex, nofollow" />
     <title>The Hangman</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -18,12 +20,12 @@
       #game { position: fixed; inset: 0; }
       #game canvas { box-shadow: 0 0 0 1px #0002; }
 
-      #prompt, #join {
+      #prompt, #join, #start {
         position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
         background: #000a; z-index: 10000; padding: 16px;
       }
-      #prompt[hidden], #join[hidden] { display: none; }
-      #prompt-form, #join-form {
+      #prompt[hidden], #join[hidden], #start[hidden] { display: none; }
+      #prompt-form, #join-form, #start-card {
         background: #fff; color: #111; width: 100%; max-width: 420px; padding: 24px;
         border: 3px solid #111; border-radius: 20px; box-sizing: border-box;
       }
@@ -47,7 +49,13 @@
         background: none; border: none; color: #555; font-size: 15px; text-decoration: underline;
         cursor: pointer; padding: 4px 0;
       }
-      #join-submit {
+      #start-card { text-align: center; padding: 32px 24px; }
+      #start-card h1 {
+        font-family: "Bodoni Moda", Georgia, serif; font-weight: 600; font-size: clamp(26px, 8vw, 40px);
+        white-space: nowrap; margin: 0 0 8px;
+      }
+      #start-card p { margin: 0 0 24px; color: #555; font-size: 16px; }
+      #join-submit, #start-play {
         width: 100%; margin-top: 8px; font-size: 18px; font-weight: bold; padding: 12px;
         border-radius: 12px; border: 3px solid #111; background: #111; color: #fff; cursor: pointer;
       }
@@ -77,6 +85,14 @@
           <button id="prompt-submit" type="submit">OK</button>
         </div>
       </form>
+    </div>
+
+    <div id="start" hidden>
+      <div id="start-card">
+        <h1>THE HANGMAN</h1>
+        <p id="start-text">Guess the word before he's hung. Play with friends on any phone or computer.</p>
+        <button id="start-play" type="button">Play</button>
+      </div>
     </div>
 
     <div id="join" hidden>
