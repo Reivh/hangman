@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { connect } from './net/room';
+import { connect, joinGame, myProfile } from './net/room';
+import { askProfile } from './ui/join';
 import { GameScene, HEIGHT, WIDTH } from './scenes/GameScene';
 
 async function loadFonts(): Promise<void> {
@@ -11,7 +12,9 @@ async function loadFonts(): Promise<void> {
 async function boot(): Promise<void> {
   await loadFonts();
   // Shows Playroom's lobby (room code, QR, names/avatars) and resolves once the game launches.
-  await connect();
+  const needsProfile = await connect();
+  // Start the game straight away, even behind the join screen: if Playroom hands this player the
+  // host role while they're still picking a name, the host's jobs must keep running.
   new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
@@ -24,6 +27,11 @@ async function boot(): Promise<void> {
     },
     scene: [GameScene],
   });
+  // Late joiners aren't counted as players until they've picked a name and icon.
+  if (needsProfile) {
+    const { name, photo } = await askProfile(myProfile());
+    joinGame(name, photo);
+  }
 }
 
 boot();

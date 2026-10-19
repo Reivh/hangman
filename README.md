@@ -5,9 +5,13 @@ Multiplayer Hangman for friends, in the browser or on a phone. Built with **Phas
 ## How to play
 
 1. One person opens the game and gets a room. Others join via the room code / QR code / invite link.
+   Anyone joining after the game has launched gets a short join screen to pick a name and icon (the same
+   default Multiavatar icons Playroom uses). They're counted as a player once they've picked.
 2. The host taps **Start game**. Players take turns being the **word picker** (rotating each round).
 3. The picker types a secret word or short phrase. Only they can see it.
-4. Everyone else guesses letters together (tap the on-screen keys or use a keyboard).
+4. Everyone else guesses letters (tap the on-screen keys or use a keyboard). With **2 or more guessers it's
+   turn-based**: one guess each (letter or whole word), then the turn passes on, whether it was right or wrong.
+   The picker can skip someone's turn if they've wandered off. With a single guesser there are no turns.
    Every wrong letter adds a part: base, pole, beam, brace, rope, head, body, arms, legs. That's **11 misses**.
 5. Guessers win if they reveal the word before the man is hung. You can also guess the whole word, but a wrong guess costs a part.
 
@@ -29,7 +33,7 @@ npm test           # rules unit tests (vitest)
 npm run build      # type-check + production build into dist/
 ```
 
-Dev-only shortcut: `http://localhost:5173/?skiplobby` skips Playroom's lobby screen.
+Dev-only shortcut: `http://localhost:5173/?skiplobby` skips Playroom's lobby and the join screen.
 
 Optional: register the game at <https://dev.joinplayroom.com> and put its id in `.env.local` as
 `VITE_PLAYROOM_GAME_ID=...` (see `.env.example`).
@@ -46,5 +50,7 @@ GitHub Pages, itch.io, etc. Playroom handles the multiplayer networking, so you 
 | `src/logic/hangman.ts` | Pure rules: normalising words, masking, applying guesses, win/lose, points |
 | `src/net/room.ts` | Playroom glue: lobby, shared state, RPC, who's allowed to do what |
 | `src/scenes/GameScene.ts` | Phaser scene: renders lobby / choosing / guessing / results |
+| `src/scenes/wordLayout.ts` | Fits the hidden word on screen (line wrapping, letter size) |
 | `src/draw/gallows.ts` | The gallows drawing (dotted outline, filled in on each miss) |
 | `src/ui/prompt.ts` | HTML input dialog (native phone keyboard) for words |
+| `src/ui/join.ts`, `src/ui/avatars.ts` | Join screen for late joiners; default-style avatars |

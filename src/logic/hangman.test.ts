@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_WORD_LENGTH,
   MAX_WRONG,
   applyLetter,
   applyWordGuess,
@@ -7,6 +8,7 @@ import {
   mask,
   newRound,
   normalizeWord,
+  syncTurn,
 } from './hangman';
 
 const start = (word: string, danish = false) => beginGuessing(newRound(1, 'chooser', danish), word);
@@ -18,6 +20,10 @@ describe('normalizeWord', () => {
   it('rejects Danish letters unless enabled', () => {
     expect(normalizeWord('rødgrød', false).ok).toBe(false);
     expect(normalizeWord('rødgrød', true)).toEqual({ ok: true, word: 'RØDGRØD' });
+  });
+  it('allows phrases up to MAX_WORD_LENGTH characters', () => {
+    expect(normalizeWord('a'.repeat(MAX_WORD_LENGTH), false).ok).toBe(true);
+    expect(normalizeWord('a'.repeat(MAX_WORD_LENGTH + 1), false).ok).toBe(false);
   });
   it('rejects digits and too-short words', () => {
     expect(normalizeWord('abc1', false).ok).toBe(false);
@@ -80,5 +86,35 @@ describe('applyWordGuess', () => {
     const res = applyWordGuess(start('HELLO'), 'HELLO', 'HELLA', 'p1', 'Ann');
     expect(res.round.wrong).toBe(1);
     expect(res.round.wrongWords).toEqual(['HELLA']);
+  });
+});
+
+describe('turns', () => {
+  const guessers = ['chooser', 'p1', 'p2', 'p3'];
+
+  it('stays free-for-all with a single guesser', () => {
+    expect(syncTurn(start('CAT'), ['chooser', 'p1'], false).turnId).toBeNull();
+  });
+
+  it('starts with the first guesser and rotates, skipping the chooser', () => {
+    let r = syncTurn(start('CAT'), guessers, false);
+    expect(r.turnId).toBe('p1');
+    r = syncTurn(r, guessers, true);
+    expect(r.turnId).toBe('p2');
+    r = syncTurn(syncTurn(r, guessers, true), guessers, true);
+    expect(r.turnId).toBe('p1');
+  });
+
+  it('rejects guesses out of turn', () => {
+    const r = syncTurn(start('CAT'), guessers, false);
+    expect(applyLetter(r, 'CAT', 'C', 'p2', 'Bo').ignored).toBe(true);
+    expect(applyWordGuess(r, 'CAT', 'CAT', 'p2', 'Bo').ignored).toBe(true);
+    expect(applyLetter(r, 'CAT', 'C', 'p1', 'Ann').ignored).toBe(false);
+  });
+
+  it('moves on when the current guesser leaves, and goes free-for-all below 2 guessers', () => {
+    const r = syncTurn(start('CAT'), guessers, false);
+    expect(syncTurn(r, ['chooser', 'p2', 'p3'], false).turnId).toBe('p2');
+    expect(syncTurn(r, ['chooser', 'p3'], false).turnId).toBeNull();
   });
 });

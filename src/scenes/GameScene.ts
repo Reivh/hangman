@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import * as net from '../net/room';
 import { GALLOWS_W, drawGallows } from '../draw/gallows';
-import { HIDDEN, MAX_WRONG, alphabet, normalizeWord, type RoundState } from '../logic/hangman';
+import { HIDDEN, MAX_WRONG, alphabet, canGuess, normalizeWord, type RoundState } from '../logic/hangman';
 import { closePrompt, isPromptOpen, openPrompt } from '../ui/prompt';
+import { LINE_SPACING, layoutWord } from './wordLayout';
 
 export const WIDTH = 720;
 export const HEIGHT = 1280;
@@ -43,17 +44,20 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     this.ui = this.add.container(0, 0);
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
-      if (isPromptOpen() || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+      if (isPromptOpen() || e.target instanceof HTMLInputElement) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
       this.tryGuessLetter(e.key.toLocaleUpperCase('da-DK'));
     });
   }
 
   update(): void {
     net.hostWatchdog();
+    net.chooserWatchdog();
     const snapshot = JSON.stringify([
       net.round(),
       net.scores(),
       net.playerList(),
+      net.joiningCount(),
       net.amHost(),
       net.danish(),
       net.mySecret() !== null,
@@ -77,6 +81,8 @@ export class GameScene extends Phaser.Scene {
       this.lastWrong = 0;
     }
     if (round) for (const l of round.guessed) this.pending.delete(l);
+    // The word picker silently drops out-of-turn guesses, so don't leave those keys greyed out.
+    if (!round || !canGuess(round, meId)) this.pending.clear();
     if (this.promptContext && this.promptContext !== contextOf(round)) {
       closePrompt();
       this.promptContext = null;
@@ -144,7 +150,8 @@ export class GameScene extends Phaser.Scene {
     const lines = [
       `• Every wrong letter adds a part — ${MAX_WRONG} misses and he's hung.`,
       '• Correct letter: +1 per letter revealed. Solve it: +3.',
-      '• Guess the whole word any time, but a wrong guess costs a part.',
+      '• With 2+ guessers you take turns, one guess each.',
+      '• Guess the whole word on your go, but a wrong guess costs a part.',
       '• If he hangs, the word-picker gets +3.',
     ];
     this.text(WIDTH / 2, KEYS_Y + 120, lines.join('\n'), {
@@ -182,7 +189,12 @@ export class GameScene extends Phaser.Scene {
     this.renderWord(round.masked, secret, round.status === 'lost' || round.status === 'abandoned', mine && !over);
 
     const wrongWords = round.wrongWords.length ? ` · Wrong words: ${round.wrongWords.join(', ')}` : '';
-    this.text(WIDTH / 2, 756, `Misses ${round.wrong} / ${MAX_WRONG}${wrongWords}`, {
+    const myTurn = canGuess(round, meId);
+    let turn = '';
+    if (!over && round.turnId) {
+      turn = round.turnId === meId ? ' · Your turn!' : ` · ${net.playerName(round.turnId)}'s turn`;
+    }
+    this.text(WIDTH / 2, 756, `Misses ${round.wrong} / ${MAX_WRONG}${turn}${wrongWords}`, {
       fontFamily: SANS,
       fontSize: '22px',
       color: '#333',
@@ -191,12 +203,14 @@ export class GameScene extends Phaser.Scene {
     });
     this.renderEventLine(round);
 
-    const canGuess = !mine && !over;
-    this.renderKeyboard(round, canGuess);
+    this.renderKeyboard(round, myTurn);
 
     if (round.status === 'guessing') {
       if (mine) {
-        this.note(BUTTON_Y, 'Your word is hidden from everyone else. Watch them sweat!');
+        if (round.turnId) {
+          const name = net.playerName(round.turnId);
+          this.button(WIDTH / 2, BUTTON_Y, 400, `Skip ${name}'s turn`, true, () => net.skipTurn(), true);
+        } else this.note(BUTTON_Y, 'Your word is hidden from everyone else. Watch them sweat!');
         if (secret === null) {
           this.note(BUTTON_Y - 36, 'Lost your word after switching device — skip the round.', RED);
           this.button(WIDTH / 2, BUTTON_Y - 80, 260, 'Skip round', true, () => net.abandonRound(), true);
@@ -204,7 +218,14 @@ export class GameScene extends Phaser.Scene {
       } else {
         const w = net.amHost() ? 380 : 440;
         const x = net.amHost() ? WIDTH / 2 - 120 : WIDTH / 2;
-        this.button(x, BUTTON_Y, w, 'Guess the whole word', true, () => this.promptWordGuess(round));
+        if (myTurn) this.button(x, BUTTON_Y, w, 'Guess the whole word', true, () => this.promptWordGuess(round));
+        else {
+          this.text(x, BUTTON_Y, `Waiting for ${net.playerName(round.turnId ?? '')}…`, {
+            fontFamily: SANS,
+            fontSize: '22px',
+            color: '#555',
+          });
+        }
       }
       if (net.amHost() && !mine) {
         this.button(WIDTH / 2 + 205, BUTTON_Y, 190, 'Skip round', true, () => net.abandonRound(), true);
@@ -221,35 +242,31 @@ export class GameScene extends Phaser.Scene {
 
   /** Letter slots, wrapped on spaces. `reveal` fills hidden slots (grey for the chooser, red after a loss). */
   private renderWord(masked: string, reveal: string | null, lost: boolean, chooserView: boolean): void {
-    const lines = wrapWords(masked, 12);
-    const longest = Math.max(...lines.map((l) => l.length));
-    const slot = Math.min(56, (WIDTH - 40) / longest);
+    const { lines, slot } = layoutWord(masked, WIDTH);
     const font = Math.round(slot * 0.78);
-    const lineH = Math.max(slot * 1.15, 58);
+    const lineH = slot * LINE_SPACING;
     const top = WORD_Y - ((lines.length - 1) * lineH) / 2;
     const g = this.add.graphics();
     this.ui.add(g);
-    g.lineStyle(4, INK);
+    g.lineStyle(Math.max(2, slot / 14), INK);
 
-    let index = 0;
     lines.forEach((line, row) => {
       const y = top + row * lineH;
-      const left = (WIDTH - line.length * slot) / 2;
-      [...line].forEach((ch, col) => {
+      const left = (WIDTH - line.text.length * slot) / 2;
+      [...line.text].forEach((ch, col) => {
         const cx = left + col * slot + slot / 2;
-        const original = index + col;
-        if (ch !== ' ' && ch !== '-' && ch !== "'") g.lineBetween(cx - slot * 0.38, y + 24, cx + slot * 0.38, y + 24);
+        const under = y + font * 0.6;
+        if (ch !== ' ' && ch !== '-' && ch !== "'") g.lineBetween(cx - slot * 0.38, under, cx + slot * 0.38, under);
         let shown = ch;
         let color = '#111';
         if (ch === HIDDEN) {
-          shown = reveal?.[original] ?? '';
+          shown = reveal?.[line.start + col] ?? '';
           color = lost ? RED : chooserView ? '#aaa' : '#111';
         }
         if (shown && shown !== ' ') {
-          this.text(cx, y - 6, shown, { fontFamily: SANS, fontSize: `${font}px`, fontStyle: 'bold', color });
+          this.text(cx, y, shown, { fontFamily: SANS, fontSize: `${font}px`, fontStyle: 'bold', color });
         }
       });
-      index += line.length + 1; // +1 for the space we wrapped on
     });
   }
 
@@ -262,7 +279,8 @@ export class GameScene extends Phaser.Scene {
     else if (e) {
       const who = e.byId === net.me() ? 'You' : e.byName;
       msg = `${who} guessed ${e.value} ${e.hit ? '✓' : '✗'}`;
-    } else msg = 'Tap a letter to guess!';
+    } else msg = round.chooserId === net.me() ? 'Waiting for the first guess…' : 'Tap a letter to guess!';
+    if (!e && round.status === 'guessing' && round.turnId === net.me()) msg = 'Your turn — tap a letter!';
     const t = this.text(WIDTH / 2, 790, msg, {
       fontFamily: HAND,
       fontSize: '28px',
@@ -329,12 +347,15 @@ export class GameScene extends Phaser.Scene {
     const line = net
       .playerList()
       .map((p) => {
-        const mark = round?.chooserId === p.id ? '✎ ' : '';
+        const turn = round?.status === 'guessing' && round.turnId === p.id;
+        const mark = round?.chooserId === p.id ? '✎ ' : turn ? '▶ ' : '';
         const you = p.id === net.me() ? ' (you)' : '';
         return `${mark}${p.name}${you}: ${scores[p.id] ?? 0}`;
       })
       .join('    ');
-    this.text(56, BOX_Y + 74, line, { fontFamily: SANS, fontSize: '20px', color: '#444' }, 0).setWordWrapWidth(
+    const joining = net.joiningCount();
+    const suffix = joining ? `    +${joining} joining…` : '';
+    this.text(56, BOX_Y + 74, line + suffix, { fontFamily: SANS, fontSize: '20px', color: '#444' }, 0).setWordWrapWidth(
       WIDTH - 110,
     );
   }
@@ -344,17 +365,22 @@ export class GameScene extends Phaser.Scene {
       this.cameras.main.shake(160, 0.006);
     }
     if (round && round.status === 'won' && this.lastStatus !== 'won') this.cameras.main.flash(300, 255, 255, 255);
+    // Nudge the player when it becomes their turn (phones vibrate where supported).
+    const myTurnNow = !!round && round.status === 'guessing' && round.turnId === net.me();
+    if (myTurnNow && !this.wasMyTurn) navigator.vibrate?.(120);
+    this.wasMyTurn = myTurnNow;
     this.lastRoundId = round?.id ?? -1;
     this.lastWrong = round?.wrong ?? 0;
     this.lastStatus = round?.status ?? null;
   }
   private lastStatus: string | null = null;
+  private wasMyTurn = false;
 
   // ---- Actions ----------------------------------------------------------------
 
   private tryGuessLetter(letter: string): void {
     const round = net.round();
-    if (!round || round.status !== 'guessing' || round.chooserId === net.me()) return;
+    if (!round || !canGuess(round, net.me())) return;
     if (!alphabet(round.danish).includes(letter) || round.guessed.includes(letter) || this.pending.has(letter)) return;
     this.pending.add(letter);
     net.guess('letter', letter);
@@ -422,12 +448,14 @@ export class GameScene extends Phaser.Scene {
     const fill = !enabled ? 0xeeeeee : subtle ? PAPER : INK;
     const rect = this.add.rectangle(x, y, w, h, fill).setStrokeStyle(3, enabled ? INK : MUTED);
     this.ui.add(rect);
-    this.text(x, y, label, {
+    const text = this.text(x, y, label, {
       fontFamily: SANS,
       fontSize: '24px',
       fontStyle: 'bold',
       color: !enabled ? '#999' : subtle ? '#111' : '#fff',
     });
+    const room = w - 28;
+    if (text.width > room) text.setScale(room / text.width);
     if (enabled) {
       rect
         .setInteractive({ useHandCursor: true })
@@ -441,24 +469,9 @@ export class GameScene extends Phaser.Scene {
   }
 }
 
+/** Identifies the moment a prompt was opened for; it closes if the round, status or turn moves on. */
 function contextOf(round: RoundState | null): string {
-  return round ? `${round.id}:${round.status}` : 'lobby';
-}
-
-/** Greedy wrap on spaces. Each output line keeps its own characters (spaces between words included). */
-function wrapWords(masked: string, max: number): string[] {
-  const lines: string[] = [];
-  let current = '';
-  for (const word of masked.split(' ')) {
-    if (!current) current = word;
-    else if (current.length + 1 + word.length <= max) current += ' ' + word;
-    else {
-      lines.push(current);
-      current = word;
-    }
-  }
-  lines.push(current);
-  return lines;
+  return round ? `${round.id}:${round.status}:${round.turnId ?? ''}` : 'lobby';
 }
 
 async function shareLink(code: string): Promise<void> {

@@ -1,4 +1,6 @@
 // A small HTML dialog over the canvas. Real <input> elements give phones their native keyboard.
+import { MAX_WORD_LENGTH } from '../logic/hangman';
+import { $ } from './dom';
 
 export interface PromptOptions {
   title: string;
@@ -11,8 +13,6 @@ export interface PromptOptions {
   validate: (value: string) => string | null;
   onSubmit: (value: string) => void;
 }
-
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 let open = false;
 
@@ -32,6 +32,7 @@ export function openPrompt(opts: PromptOptions): void {
   $('prompt-submit').textContent = opts.submitLabel;
   $('prompt-reveal-row').hidden = !opts.secret;
   input.placeholder = opts.placeholder;
+  input.maxLength = MAX_WORD_LENGTH;
   input.value = '';
   error.textContent = '';
   reveal.checked = false;

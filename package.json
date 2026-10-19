@@ -10,6 +10,7 @@
   },
   "type": "module",
   "dependencies": {
+    "@multiavatar/multiavatar": "^1.0.7",
     "phaser": "^4.2.1",
     "playroomkit": "^0.0.97",
     "react": "^19.3.1",

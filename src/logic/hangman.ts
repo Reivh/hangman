@@ -22,7 +22,7 @@ export const ALPHABET_DA = [...ALPHABET_EN, 'Æ', 'Ø', 'Å'];
 export const HIDDEN = '_';
 /** Characters that are shown from the start and never guessed. */
 const SHOWN = new Set([' ', '-', "'"]);
-export const MAX_WORD_LENGTH = 30;
+export const MAX_WORD_LENGTH = 60;
 
 export function alphabet(danish: boolean): string[] {
   return danish ? ALPHABET_DA : ALPHABET_EN;
@@ -50,6 +50,8 @@ export interface RoundState {
   wrongLetters: string[];
   wrongWords: string[];
   wrong: number;
+  /** Whose turn it is to guess, or null when anyone may guess (fewer than 2 guessers). */
+  turnId: string | null;
   word: string | null;
   lastEvent: GuessEvent | null;
 }
@@ -90,6 +92,7 @@ export function newRound(id: number, chooserId: string, danish: boolean): RoundS
     wrongLetters: [],
     wrongWords: [],
     wrong: 0,
+    turnId: null,
     word: null,
     lastEvent: null,
   };
@@ -97,6 +100,31 @@ export function newRound(id: number, chooserId: string, danish: boolean): RoundS
 
 export function beginGuessing(round: RoundState, word: string): RoundState {
   return { ...round, status: 'guessing', masked: mask(word, []) };
+}
+
+/** Turns kick in once at least this many players (besides the word picker) are guessing. */
+export const TURN_BASED_FROM = 2;
+
+/**
+ * Make `turnId` match the current guessers: null when there are too few of them or the round is over,
+ * otherwise a valid guesser. With `advance`, the turn moves to the next guesser in order.
+ */
+export function syncTurn(round: RoundState, guessers: readonly string[], advance: boolean): RoundState {
+  const ids = guessers.filter((id) => id !== round.chooserId);
+  let turnId: string | null = null;
+  if (round.status === 'guessing' && ids.length >= TURN_BASED_FROM) {
+    const at = round.turnId ? ids.indexOf(round.turnId) : -1;
+    if (at === -1) turnId = ids[0];
+    else turnId = advance ? ids[(at + 1) % ids.length] : ids[at];
+  }
+  return turnId === round.turnId ? round : { ...round, turnId };
+}
+
+/** Whether this player may guess right now. */
+export function canGuess(round: RoundState, playerId: string): boolean {
+  return (
+    round.status === 'guessing' && playerId !== round.chooserId && (round.turnId === null || round.turnId === playerId)
+  );
 }
 
 export const POINTS = { letter: 1, solve: 3, hanged: 3 } as const;
@@ -128,8 +156,7 @@ export function applyLetter(
 ): GuessResult {
   const letter = rawLetter.toLocaleUpperCase('da-DK');
   if (
-    round.status !== 'guessing' ||
-    byId === round.chooserId ||
+    !canGuess(round, byId) ||
     !alphabet(round.danish).includes(letter) ||
     round.guessed.includes(letter)
   ) {
@@ -159,7 +186,7 @@ export function applyWordGuess(
   byName: string,
 ): GuessResult {
   const normalized = normalizeWord(rawGuess, round.danish);
-  if (round.status !== 'guessing' || byId === round.chooserId || !normalized.ok) {
+  if (!canGuess(round, byId) || !normalized.ok) {
     return { round, points: {}, ignored: true };
   }
   const guess = normalized.word;

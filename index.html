@@ -18,25 +18,40 @@
       #game { position: fixed; inset: 0; }
       #game canvas { box-shadow: 0 0 0 1px #0002; }
 
-      #prompt {
+      #prompt, #join {
         position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
         background: #000a; z-index: 10000; padding: 16px;
       }
-      #prompt[hidden] { display: none; }
-      #prompt-form {
+      #prompt[hidden], #join[hidden] { display: none; }
+      #prompt-form, #join-form {
         background: #fff; color: #111; width: 100%; max-width: 420px; padding: 24px;
         border: 3px solid #111; border-radius: 20px; box-sizing: border-box;
       }
-      #prompt-title { font-family: "Bodoni Moda", Georgia, serif; margin: 0 0 6px; font-size: 26px; }
-      #prompt-hint { margin: 0 0 16px; color: #555; font-size: 15px; }
-      #prompt-input {
+      #prompt-title, #join-form h2 { font-family: "Bodoni Moda", Georgia, serif; margin: 0 0 6px; font-size: 26px; }
+      #prompt-hint, #join-form p { margin: 0 0 16px; color: #555; font-size: 15px; }
+      #prompt-input, #join-name {
         width: 100%; box-sizing: border-box; font-size: 22px; padding: 12px 14px; letter-spacing: 2px;
         text-transform: uppercase; border: 3px solid #111; border-radius: 12px; outline: none;
       }
       #prompt-input.masked { -webkit-text-security: disc; text-security: disc; }
       #prompt-reveal-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 15px; }
       #prompt-reveal-row[hidden] { display: none; }
-      #prompt-error { color: #c0392b; min-height: 20px; margin: 10px 0 0; font-size: 15px; }
+      #join-name { text-transform: none; letter-spacing: 0; }
+      #join-avatars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0 8px; }
+      #join-avatars button {
+        padding: 4px; border: 3px solid transparent; border-radius: 50%; background: none; cursor: pointer;
+      }
+      #join-avatars button[aria-pressed="true"] { border-color: #111; }
+      #join-avatars img { display: block; width: 100%; aspect-ratio: 1; }
+      #join-shuffle {
+        background: none; border: none; color: #555; font-size: 15px; text-decoration: underline;
+        cursor: pointer; padding: 4px 0;
+      }
+      #join-submit {
+        width: 100%; margin-top: 8px; font-size: 18px; font-weight: bold; padding: 12px;
+        border-radius: 12px; border: 3px solid #111; background: #111; color: #fff; cursor: pointer;
+      }
+      #prompt-error, #join-error { color: #c0392b; min-height: 20px; margin: 10px 0 0; font-size: 15px; }
       .prompt-buttons { display: flex; gap: 10px; margin-top: 12px; }
       .prompt-buttons button {
         flex: 1; font-size: 18px; font-weight: bold; padding: 12px; border-radius: 12px;
@@ -53,7 +68,7 @@
       <form id="prompt-form" autocomplete="off">
         <h2 id="prompt-title"></h2>
         <p id="prompt-hint"></p>
-        <input id="prompt-input" type="text" maxlength="30" autocomplete="off" autocorrect="off"
+        <input id="prompt-input" type="text" autocomplete="off" autocorrect="off"
                autocapitalize="characters" spellcheck="false" enterkeyhint="done" />
         <label id="prompt-reveal-row"><input id="prompt-reveal" type="checkbox" /> Show what I typed</label>
         <p id="prompt-error" role="alert"></p>
@@ -61,6 +76,19 @@
           <button id="prompt-cancel" type="button">Cancel</button>
           <button id="prompt-submit" type="submit">OK</button>
         </div>
+      </form>
+    </div>
+
+    <div id="join" hidden>
+      <form id="join-form" autocomplete="off">
+        <h2>Join the game</h2>
+        <p>The game has already started. Pick a name and an icon to jump in.</p>
+        <input id="join-name" type="text" maxlength="16" autocomplete="off" autocorrect="off"
+               spellcheck="false" enterkeyhint="done" placeholder="Your name" aria-label="Your name" />
+        <div id="join-avatars" role="group" aria-label="Icon"></div>
+        <button id="join-shuffle" type="button">Show other icons</button>
+        <p id="join-error" role="alert"></p>
+        <button id="join-submit" type="submit">Join game</button>
       </form>
     </div>
 
