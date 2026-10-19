@@ -23,6 +23,7 @@ import {
   applyWordGuess,
   beginGuessing,
   canGuess,
+  MAX_WORD_LENGTH,
   newRound,
   syncTurn,
   type GuessResult,
@@ -64,7 +65,7 @@ export async function connect(): Promise<boolean> {
     player.onQuit(() => players.delete(player.id));
   });
 
-  RPC.register('guess', async (payload: GuessPayload, sender) => {
+  RPC.register('guess', async (payload: unknown, sender) => {
     handleGuess(payload, sender);
   });
 
@@ -89,7 +90,7 @@ export async function connect(): Promise<boolean> {
 /** Name and icon from Playroom's profile, used to prefill the join screen. */
 export function myProfile(): { name: string; photo: string } {
   const profile = myPlayer().getProfile();
-  return { name: (profile?.name ?? '').slice(0, MAX_NAME_LENGTH), photo: profile?.photo ?? '' };
+  return { name: (profile?.name ?? '').slice(0, MAX_NAME_LENGTH), photo: safePhoto(profile?.photo) };
 }
 
 export function joinGame(name: string, photo: string): void {
@@ -110,6 +111,19 @@ export const danish = (): boolean => !!getState('danish');
 
 const isJoined = (p: PlayerState): boolean => !!p.getState('joined');
 
+/** Big enough for Playroom/Multiavatar icons (a few KB), small enough that nobody can bloat memory. */
+const MAX_PHOTO_LENGTH = 100_000;
+
+/**
+ * Only accept icons embedded as data:image URLs. Profiles are written by each player's own browser,
+ * so a remote URL would make everyone fetch it from a server of the sender's choosing (leaking IPs).
+ */
+function safePhoto(photo: unknown): string {
+  return typeof photo === 'string' && photo.startsWith('data:image/') && photo.length <= MAX_PHOTO_LENGTH
+    ? photo
+    : '';
+}
+
 /** Names from Playroom's lobby aren't length-limited, so cap them for display. */
 function displayName(p: PlayerState): string {
   const name = p.getProfile()?.name || 'Player';
@@ -128,7 +142,7 @@ function currentRoster(): Roster {
         id: p.id,
         name: displayName(p),
         color: p.getProfile()?.color?.hexString ?? '#222',
-        photo: p.getProfile()?.photo ?? '',
+        photo: safePhoto(p.getProfile()?.photo),
       })),
       joining: all.filter((p) => !isJoined(p)).length,
     };
@@ -218,12 +232,24 @@ export function submitSecret(word: string): void {
   setState('round', syncTurn(beginGuessing(r, word), joinedIds(), false), true);
 }
 
-function handleGuess(payload: GuessPayload, sender: PlayerState): void {
+/** RPC payloads come from other players' browsers, so check their shape before using them. */
+function isGuessPayload(payload: unknown): payload is GuessPayload {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const { kind, value } = payload as Record<string, unknown>;
+  return (
+    (kind === 'letter' || kind === 'word' || kind === 'pass') &&
+    typeof value === 'string' &&
+    value.length <= MAX_WORD_LENGTH * 2
+  );
+}
+
+function handleGuess(payload: unknown, sender: PlayerState): void {
+  if (!isGuessPayload(payload)) return;
   const r = round();
   const word = mySecret();
   if (!r || !word || r.status !== 'guessing' || !isJoined(sender)) return;
   const name = displayName(sender);
-  const value = String(payload.value);
+  const value = payload.value;
   let result: GuessResult;
   if (payload.kind === 'pass') result = applyPass(r, sender.id, name);
   else if (payload.kind === 'word') result = applyWordGuess(r, word, value, sender.id, name);
