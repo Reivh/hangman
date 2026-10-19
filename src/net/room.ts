@@ -33,6 +33,8 @@ export interface Player {
   id: string;
   name: string;
   color: string;
+  /** Avatar image URL (usually a data: URL) from the Playroom profile; may be empty. */
+  photo: string;
 }
 
 export const MAX_NAME_LENGTH = 16;
@@ -126,6 +128,7 @@ function currentRoster(): Roster {
         id: p.id,
         name: displayName(p),
         color: p.getProfile()?.color?.hexString ?? '#222',
+        photo: p.getProfile()?.photo ?? '',
       })),
       joining: all.filter((p) => !isJoined(p)).length,
     };

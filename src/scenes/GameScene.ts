@@ -335,34 +335,105 @@ export class GameScene extends Phaser.Scene {
   private renderPlayersBox(round: RoundState | null): void {
     const g = this.add.graphics();
     this.ui.add(g);
-    g.lineStyle(4, INK).strokeRoundedRect(30, BOX_Y, WIDTH - 60, 104, 24);
+    g.lineStyle(4, INK).strokeRoundedRect(30, BOX_Y, WIDTH - 60, 106, 24);
+    const rows = this.renderPlayerChips(round);
 
     let headline = 'PLAYERS';
     if (round?.status === 'won') headline = 'WINNER : The guessers!';
     else if (round?.status === 'lost') headline = `WINNER : ${net.playerName(round.chooserId)}`;
     else if (round?.status === 'abandoned') headline = 'WINNER : nobody this time';
-    const head = this.text(56, BOX_Y + 30, headline, { fontFamily: HAND, fontSize: '34px' }, 0);
+    // With two rows of players the heading shrinks to make room.
+    const [headY, headSize] = rows > 1 ? [BOX_Y + 22, 28] : [BOX_Y + 30, 34];
+    const head = this.text(56, headY, headline, { fontFamily: HAND, fontSize: `${headSize}px` }, 0);
     const justEnded = round && (round.status === 'won' || round.status === 'lost') && this.lastStatus !== round.status;
     if (justEnded) {
       head.setScale(0.6);
       this.tweens.add({ targets: head, scale: 1, duration: 400, ease: 'Back.Out' });
     }
+  }
 
+  /**
+   * One chip per player: icon, then "Name: score". Flows onto a second, smaller row if needed.
+   * Returns how many rows it used.
+   */
+  private renderPlayerChips(round: RoundState | null): number {
     const scores = net.scores();
-    const line = net
-      .playerList()
-      .map((p) => {
-        const turn = round?.status === 'guessing' && round.turnId === p.id;
-        const mark = round?.chooserId === p.id ? '✎ ' : turn ? '▶ ' : '';
-        const you = p.id === net.me() ? ' (you)' : '';
-        return `${mark}${p.name}${you}: ${scores[p.id] ?? 0}`;
-      })
-      .join('    ');
+    const labels = net.playerList().map((p) => {
+      const turn = round?.status === 'guessing' && round.turnId === p.id;
+      const mark = round?.chooserId === p.id ? '✎ ' : turn ? '▶ ' : '';
+      const you = p.id === net.me() ? ' (you)' : '';
+      return { player: p, text: `${mark}${p.name}${you}: ${scores[p.id] ?? 0}` };
+    });
     const joining = net.joiningCount();
-    const suffix = joining ? `    +${joining} joining…` : '';
-    this.text(56, BOX_Y + 74, line + suffix, { fontFamily: SANS, fontSize: '20px', color: '#444' }, 0).setWordWrapWidth(
-      WIDTH - 110,
-    );
+
+    const left = 56;
+    const right = WIDTH - 56;
+    const sizes = [
+      { icon: 34, font: 20, rows: [BOX_Y + 74] },
+      { icon: 26, font: 17, rows: [BOX_Y + 52, BOX_Y + 82] },
+    ];
+    for (const [i, size] of sizes.entries()) {
+      const placed = flowChips(labels, size.icon, size.font, left, right, size.rows.length, joining);
+      if (placed.overflow > 0 && i < sizes.length - 1) continue;
+
+      for (const chip of placed.chips) {
+        const y = size.rows[chip.row];
+        this.avatar(chip.x + size.icon / 2, y, size.icon, chip.player);
+        const t = this.text(chip.x + size.icon + 7, y, chip.text, { fontFamily: SANS, fontSize: `${size.font}px` }, 0);
+        t.setColor('#444');
+      }
+      const extra = [placed.overflow ? `+${placed.overflow} more` : '', joining ? `+${joining} joining…` : '']
+        .filter(Boolean)
+        .join('  ');
+      if (extra) {
+        const y = size.rows[placed.lastRow];
+        this.text(placed.endX, y, extra, { fontFamily: SANS, fontSize: `${size.font}px`, color: '#777' }, 0);
+      }
+      return size.rows.length;
+    }
+    return 1;
+  }
+
+  /** A player's icon as a circle, or their initial on their colour until the image has loaded. */
+  private avatar(x: number, y: number, size: number, player: net.Player): void {
+    const key = this.avatarTexture(player.photo);
+    if (key) {
+      const img = this.add.image(x, y, key).setDisplaySize(size, size);
+      this.ui.add(img);
+      return;
+    }
+    const color = Phaser.Display.Color.HexStringToColor(player.color || '#888').color;
+    const dot = this.add.circle(x, y, size / 2, color);
+    this.ui.add(dot);
+    const initial = (player.name.trim()[0] ?? '?').toUpperCase();
+    this.text(x, y, initial, { fontFamily: SANS, fontSize: `${Math.round(size * 0.5)}px`, fontStyle: 'bold' });
+  }
+
+  /** Texture key for an avatar URL, loading it (cropped to a circle) on first use. */
+  private avatarTexture(photo: string): string | null {
+    if (!photo) return null;
+    const known = this.avatarKeys.get(photo);
+    if (known !== undefined) return known;
+    this.avatarKeys.set(photo, null); // Loading (or failed): use the placeholder meanwhile.
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const px = 96;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = px;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.beginPath();
+      ctx.arc(px / 2, px / 2, px / 2, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(img, 0, 0, px, px);
+      const key = `avatar-${this.avatarCount++}`;
+      this.textures.addCanvas(key, canvas);
+      this.avatarKeys.set(photo, key);
+      this.lastSnapshot = ''; // Redraw with the real icon.
+    };
+    img.src = photo;
+    return null;
   }
 
   private reactToChanges(round: RoundState | null): void {
@@ -379,6 +450,9 @@ export class GameScene extends Phaser.Scene {
     this.lastStatus = round?.status ?? null;
   }
   private lastStatus: string | null = null;
+  /** Avatar URL -> texture key, or null while loading / if it failed. */
+  private avatarKeys = new Map<string, string | null>();
+  private avatarCount = 0;
   private wasMyTurn = false;
 
   // ---- Actions ----------------------------------------------------------------
@@ -485,6 +559,57 @@ export class GameScene extends Phaser.Scene {
 /** Identifies the moment a prompt was opened for; it closes if the round, status or turn moves on. */
 function contextOf(round: RoundState | null): string {
   return round ? `${round.id}:${round.status}:${round.turnId ?? ''}` : 'lobby';
+}
+
+type ChipLabel = { player: net.Player; text: string };
+type PlacedChip = ChipLabel & { x: number; row: number };
+
+const measureCtx = document.createElement('canvas').getContext('2d');
+
+function textWidth(text: string, font: number): number {
+  if (!measureCtx) return text.length * font * 0.55;
+  measureCtx.font = `${font}px ${SANS}`;
+  return measureCtx.measureText(text).width;
+}
+
+/** Lay chips out left to right, wrapping onto up to `maxRows` rows; reports how many didn't fit. */
+function flowChips(
+  labels: ChipLabel[],
+  icon: number,
+  font: number,
+  left: number,
+  right: number,
+  maxRows: number,
+  joining: number,
+) {
+  const gap = 22;
+  // On the last row, leave room for the "+N more" / "+N joining…" note.
+  const note = joining ? `+99 more  +${joining} joining…` : '+99 more';
+  const reserve = textWidth(note, font) + gap;
+  const chips: PlacedChip[] = [];
+  let x = left;
+  let row = 0;
+  let overflow = 0;
+  labels.forEach((label, i) => {
+    if (overflow) {
+      overflow++;
+      return;
+    }
+    const w = icon + 7 + textWidth(label.text, font);
+    const needsNote = i < labels.length - 1 || joining > 0;
+    const limit = row === maxRows - 1 && needsNote ? right - reserve : right;
+    if (x + w > limit && x > left) {
+      if (row + 1 >= maxRows) {
+        overflow++;
+        return;
+      }
+      row++;
+      x = left;
+    }
+    chips.push({ ...label, x, row });
+    x += w + gap;
+  });
+  return { chips, overflow, endX: x, lastRow: row };
 }
 
 async function shareLink(code: string): Promise<void> {
