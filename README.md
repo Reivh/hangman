@@ -39,8 +39,9 @@ casual visitors don't count towards Playroom's daily-user quota. The page also a
 
 Dev-only shortcut: `http://localhost:5173/?skiplobby` skips the start screen, Playroom's lobby and the join screen.
 
-Optional: register the game at <https://dev.joinplayroom.com> and put its id in `.env.local` as
-`VITE_PLAYROOM_GAME_ID=...` (see `.env.example`).
+The Playroom gameId is only used by production builds. The dev server runs Playroom in dev mode, so testing doesn't
+use up the free plan's 10 daily users. The live site gets the gameId from the `VITE_PLAYROOM_GAME_ID` repository
+variable; for local production builds, put it in `.env.production.local` (see `.env.example`).
 
 ## Deploying
 
@@ -54,6 +55,8 @@ builds, and redeploys (`.github/workflows/pages.yml`).
 
 | Path | What |
 | --- | --- |
+| `src/main.ts` | Entry point: start screen, then loads the game after Play |
+| `src/app.ts` | Connects to Playroom and starts Phaser |
 | `src/logic/hangman.ts` | Pure rules: normalising words, masking, applying guesses, win/lose, points |
 | `src/net/room.ts` | Playroom glue: lobby, shared state, RPC, who's allowed to do what |
 | `src/scenes/GameScene.ts` | Phaser scene: renders lobby / choosing / guessing / results |
@@ -61,3 +64,5 @@ builds, and redeploys (`.github/workflows/pages.yml`).
 | `src/draw/gallows.ts` | The gallows drawing (dotted outline, filled in on each miss) |
 | `src/ui/prompt.ts` | HTML input dialog (native phone keyboard) for words |
 | `src/ui/join.ts`, `src/ui/avatars.ts` | Join screen for late joiners; default-style avatars |
+| `src/ui/start.ts` | Tap-to-Play start screen |
+| `src/dev.ts` | Dev-only `?skiplobby` flag |

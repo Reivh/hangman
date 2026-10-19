@@ -52,7 +52,10 @@ let secret: { roundId: number; word: string } | null = null;
  * Playroom's lobby only runs before the game launches, so anyone arriving later skips it.
  */
 export async function connect(): Promise<boolean> {
-  const gameId = import.meta.env.VITE_PLAYROOM_GAME_ID as string | undefined;
+  // Only production builds use the registered gameId: the free plan allows 10 unique users a day, and
+  // dev/testing sessions (each test browser is a "new" user) would use them up. Without it, Playroom
+  // runs in dev mode.
+  const gameId = import.meta.env.PROD ? (import.meta.env.VITE_PLAYROOM_GAME_ID as string | undefined) : undefined;
   await insertCoin({
     skipLobby,
     maxPlayersPerRoom: 12,
