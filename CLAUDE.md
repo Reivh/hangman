@@ -24,11 +24,12 @@ Run `npx tsc` and `npm test` before committing.
 ## Architecture rules
 
 - **The secret word never enters shared state.** Playroom state is visible to every client. The word lives
-  only in the word picker's browser (memory + sessionStorage). Guessers send guesses by RPC; the picker's
+  only in the word picker's browser (memory + localStorage). Guessers send guesses by RPC; the picker's
   client validates them and publishes only the masked word. The word is written to state only once the round
   has ended.
 - **Who writes what:** the word picker's client owns the round during play (guesses, turns, scores). The host
-  only starts rounds, ends stuck rounds and changes settings. Keep it that way to avoid conflicting writes.
+  only starts rounds, ends stuck rounds, changes settings and restores returning players' `joined` flag and
+  profile. Keep it that way to avoid conflicting writes.
 - **Treat everything from other clients as untrusted:** RPC payloads, profile names and avatar URLs come from
   other players' browsers. Validate shape and size, render text in the canvas or via `textContent` (never as
   HTML), and only accept `data:image/` avatars.
@@ -48,8 +49,16 @@ Run `npx tsc` and `npm test` before committing.
 - `getParticipants()` returns an array at runtime despite its `Record` type; read ids from the players.
 - Don't call `getProfile()` on other players: it converts their colour and throws if a client wrote a
   non-string. Read the raw `profile` state and validate each field (see `src/net/room.ts`).
-- A player who reloads keeps the same id; the host waits a grace period before ending the round of a
-  word picker who dropped out.
+- Playroom keeps the player id and profile in sessionStorage (one tab). `src/net/identity.ts` backs them up in
+  localStorage so reopening the invite link in a new tab keeps the same player; a Web Lock stops two open
+  tabs from becoming the same player. A reload skips the start screen.
+- After a dropped connection the host recreates a player's state empty, and the player's own client doesn't
+  resend unchanged values, so the host puts back `joined` and the profile of anyone it has seen before
+  (`restoreReturningPlayers`). Without that they show as "+1 joining" and get no turns.
+- Phones drop the connection when they sleep. `reconnectGracePeriod` makes the server hold a dropped player's
+  seat for a minute; Playroom itself only retries a few times, then reloads the page. After the server lets
+  a word picker go, the host waits another 2 minutes before ending their round. The game also keeps the
+  screen awake with the Wake Lock API.
 - Playroom's lobby only runs before launch; late joiners get our own join screen (`src/ui/join.ts`).
 
 ## Testing in a browser

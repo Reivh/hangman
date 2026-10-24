@@ -27,7 +27,8 @@ The host can turn on **Danish letters (ÆØÅ)** and set the difficulty in the l
 
 Playroom's shared state is visible to every client, so the word is **never** put there. It stays only in the
 picker's browser. Guesses are sent by RPC, and the picker's client checks them and publishes just the masked word
-(`_ A N _`). The full word is only shared once the round ends. If the picker leaves, the host's client ends the round.
+(`_ A N _`). The full word is only shared once the round ends. If the picker leaves for more than two minutes, the
+host's client ends the round.
 
 ## Development
 
@@ -67,6 +68,7 @@ The game is published to **GitHub Pages** at <https://reivh.github.io/hangman/>.
 | `src/app.ts` | Connects to Playroom and starts Phaser |
 | `src/logic/hangman.ts` | Pure rules: normalising words, masking, applying guesses, win/lose, points |
 | `src/net/room.ts` | Playroom glue: lobby, shared state, RPC, who's allowed to do what |
+| `src/net/identity.ts` | Keeps a player's seat across reloads and reopened invite links |
 | `src/scenes/GameScene.ts` | Phaser scene: renders lobby / choosing / guessing / results |
 | `src/scenes/wordLayout.ts` | Fits the hidden word on screen (line wrapping, letter size) |
 | `src/draw/gallows.ts` | The gallows drawing (dotted outline, filled in on each miss) |

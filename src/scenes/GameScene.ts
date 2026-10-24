@@ -69,6 +69,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
+    net.keepMeJoined();
     net.hostWatchdog();
     net.chooserWatchdog();
     const round = net.round();

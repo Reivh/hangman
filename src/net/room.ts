@@ -1,9 +1,9 @@
 // Multiplayer glue on top of Playroom Kit.
 //
 // Secrecy model: Playroom shared state is visible to every client, so the secret word is
-// never written to it. It lives only in the chooser's browser (memory + sessionStorage so
-// a reload survives). Guessers send guesses to everyone via RPC; only the chooser's client
-// acts on them and publishes the masked result. The host only starts/advances rounds.
+// never written to it. It lives only in the chooser's browser (memory + localStorage so a
+// reload, or reopening the invite link, survives). Guessers send guesses to everyone via RPC;
+// only the chooser's client acts on them and publishes the masked result. The host only starts/advances rounds.
 import {
   RPC,
   getParticipants,
@@ -34,6 +34,7 @@ import {
   type RoundState,
 } from '../logic/hangman';
 import { skipLobby } from '../dev';
+import { adoptSavedIdentity, holdPlayer, loadSelf, saveSelf, type Self } from './identity';
 
 export interface Player {
   id: string;
@@ -52,12 +53,20 @@ const players = new Map<string, PlayerState>();
 const joinOrder: string[] = [];
 /** Last known display names, so a player who dropped out can still be named. */
 const knownNames = new Map<string, string>();
+/** Profiles of everyone seen in the game this session, so the host can put back what a reconnect loses. */
+const knownProfiles = new Map<string, Record<string, unknown>>();
 /** word is null when this device has no copy of the round's word (cached so storage isn't re-read). */
-let secret: { roundId: number; word: string | null } | null = null;
+let secret: { roundId: number; word: string | null; forgotten: boolean } | null = null;
 
-/** How long the word picker may be gone (e.g. reloading the page) before the host ends the round. */
-const CHOOSER_GRACE_MS = 30_000;
+/**
+ * How long the word picker may be gone before the host ends the round. Long enough for a phone that
+ * went to sleep to wake up and reconnect; the host can still end a stuck round sooner with End round.
+ */
+const CHOOSER_GRACE_MS = 120_000;
 let chooserGoneSince: number | null = null;
+
+/** This player, as remembered by this tab (see keepMeJoined). */
+let self: Self = { room: '', joined: false, profile: null };
 
 /**
  * Joins (or creates) the room. Resolves to true when this player still has to pick a name and icon:
@@ -68,9 +77,13 @@ export async function connect(): Promise<boolean> {
   // dev/testing sessions (each test browser is a "new" user) would use them up. Without it, Playroom
   // runs in dev mode.
   const gameId = import.meta.env.PROD ? (import.meta.env.VITE_PLAYROOM_GAME_ID as string | undefined) : undefined;
+  await adoptSavedIdentity();
   await insertCoinOrFail({
     skipLobby,
     maxPlayersPerRoom: 12,
+    // The server holds a dropped player's seat this long (ms), so a short drop (a phone that briefly slept)
+    // goes unnoticed. Their turn waits meanwhile; the word picker can skip it.
+    reconnectGracePeriod: 60_000,
     defaultStates: { round: null, scores: {}, danish: false, difficulty: DEFAULT_DIFFICULTY },
     ...(gameId ? { gameId } : {}),
   });
@@ -92,15 +105,54 @@ export async function connect(): Promise<boolean> {
     setState('lobbyPlayers', Object.values(getParticipants()).map((p) => p.id), true);
   }
   const player = myPlayer();
-  if (skipLobby || player.getState('joined')) {
-    player.setState('joined', true, true); // Dev shortcut, or reconnecting after a reload.
+  holdPlayer(player.id);
+  self = loadSelf(roomCode()) ?? { room: roomCode(), joined: false, profile: null };
+  // Dev shortcut, or coming back after a reload or in a new tab.
+  if (skipLobby || self.joined || player.getState('joined')) {
+    markJoined();
     return false;
   }
+  saveSelf(self);
   const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000));
   const lobbyPlayers = await Promise.race([waitForState<string[]>('lobbyPlayers'), timeout]);
   const sawLobby = !!lobbyPlayers?.includes(player.id);
-  if (sawLobby) player.setState('joined', true, true);
+  if (sawLobby) markJoined();
   return !sawLobby;
+}
+
+function markJoined(): void {
+  self = { ...self, joined: true };
+  keepMeJoined();
+}
+
+let lastRepair = -Infinity;
+
+/**
+ * Called every frame. Puts this player's own `joined` flag and profile back if this client's copy loses
+ * them, and keeps a copy of the profile for a reload or a new tab (see identity.ts). When only the host's
+ * copy is lost, this client can't tell; the host repairs that (see restoreReturningPlayers).
+ */
+export function keepMeJoined(): void {
+  if (!self.joined) return;
+  const player = myPlayer();
+  const profile = rawProfile(player);
+  const name = typeof profile.name === 'string' && profile.name.trim() ? profile.name : null;
+  if (name && player.getState('joined')) {
+    const photo = safePhoto(profile.photo);
+    const color = typeof profile.color === 'string' ? profile.color : '';
+    const known = self.profile;
+    if (known?.name !== name || known.photo !== photo || known.color !== color) {
+      self = { ...self, profile: { name, photo, color } };
+      saveSelf(self);
+    }
+    return;
+  }
+  // Wait a moment between repairs, so the host's copy can catch up.
+  if (performance.now() - lastRepair < 1000) return;
+  lastRepair = performance.now();
+  if (!name && self.profile) player.setState('profile', { ...profile, ...self.profile }, true);
+  player.setState('joined', true, true);
+  saveSelf(self);
 }
 
 /** insertCoin, but also rejecting when Playroom reports an error through its callback. */
@@ -120,7 +172,7 @@ export function joinGame(name: string, photo: string): void {
   const player = myPlayer();
   const profile = player.getState('profile') ?? {};
   player.setState('profile', { ...profile, name: name.trim().slice(0, MAX_NAME_LENGTH), photo }, true);
-  player.setState('joined', true, true);
+  markJoined();
 }
 
 // ---- Read side -------------------------------------------------------------
@@ -190,6 +242,7 @@ function currentRoster(): Roster {
       joining: all.filter((p) => !isJoined(p)).length,
     };
     for (const p of roster.joined) knownNames.set(p.id, p.name);
+    for (const p of all) if (isJoined(p)) knownProfiles.set(p.id, rawProfile(p));
     queueMicrotask(() => (roster = null));
   }
   return roster;
@@ -213,8 +266,15 @@ export const isConnected = (id: string): boolean => players.has(id);
 /** The secret, but only if I'm the chooser of the current round. */
 export function mySecret(): string | null {
   const r = round();
-  if (!r || r.chooserId !== me()) return null;
-  if (secret?.roundId !== r.id) secret = { roundId: r.id, word: storage('get', secretKey(r.id)) };
+  // While choosing there is no word yet: anything stored is from an earlier game that reused this room
+  // code (round numbers restart at 1).
+  if (!r || r.chooserId !== me() || r.status === 'choosing') return null;
+  if (secret?.roundId !== r.id) secret = { roundId: r.id, word: loadSecret(r.id), forgotten: false };
+  // Once the round is over the word is public anyway, so don't leave it on the device.
+  if (r.status !== 'guessing' && !secret.forgotten) {
+    secret.forgotten = true;
+    forgetSecret();
+  }
   return secret.word;
 }
 
@@ -250,6 +310,7 @@ export function abandonRound(): void {
  * because reloading the page also drops them for a moment, and they come back with their word.
  */
 export function hostWatchdog(): void {
+  if (amHost()) restoreReturningPlayers();
   const r = round();
   const active = !!r && (r.status === 'choosing' || r.status === 'guessing');
   if (!amHost() || !r || !active || players.has(r.chooserId)) {
@@ -260,6 +321,22 @@ export function hostWatchdog(): void {
   if (performance.now() - chooserGoneSince > CHOOSER_GRACE_MS) {
     chooserGoneSince = null;
     setState('round', { ...r, status: 'abandoned' }, true);
+  }
+}
+
+/**
+ * When a player's connection drops, the host drops their player state, and when they reconnect it
+ * starts again empty: no `joined` flag (so they show as "+1 joining" and get no turns) and sometimes
+ * not the profile they picked. Their own browser doesn't notice, since its copy still has both, so the
+ * host puts back what it remembers of anyone it has seen in the game before.
+ */
+function restoreReturningPlayers(): void {
+  for (const p of players.values()) {
+    const known = knownProfiles.get(p.id);
+    if (!known || isJoined(p)) continue;
+    const profile = rawProfile(p);
+    if (profile.name !== known.name || profile.photo !== known.photo) p.setState('profile', known, true);
+    p.setState('joined', true, true);
   }
 }
 
@@ -283,8 +360,8 @@ export function skipTurn(): void {
 export function submitSecret(word: string): void {
   const r = round();
   if (!r || r.status !== 'choosing' || r.chooserId !== me()) return;
-  secret = { roundId: r.id, word };
-  storage('set', secretKey(r.id), word);
+  secret = { roundId: r.id, word, forgotten: false };
+  storeSecret(r.id, word);
   setState('round', syncTurn(beginGuessing(r, word), joinedIds(), false, joinOrder), true);
 }
 
@@ -325,17 +402,35 @@ export function guess(kind: GuessPayload['kind'], value: string): void {
   RPC.call('guess', { kind, value } satisfies GuessPayload, RPC.Mode.OTHERS);
 }
 
-function secretKey(roundId: number): string {
-  return `hangman:${roomCode()}:${roundId}`;
+/** Only the latest word is kept: one per browser is all a word picker needs. */
+const SECRET_KEY = 'hangman:secret';
+/** A stored word older than this belongs to an old game night. */
+const SECRET_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+function storeSecret(roundId: number, word: string): void {
+  try {
+    localStorage.setItem(SECRET_KEY, JSON.stringify({ room: roomCode(), roundId, word, at: Date.now() }));
+  } catch {
+    // Storage can throw in private mode or embedded webviews. A reload will just lose the word.
+  }
 }
 
-/** sessionStorage can throw in private mode or embedded webviews; the game works without it. */
-function storage(op: 'get' | 'set', key: string, value = ''): string | null {
+function loadSecret(roundId: number): string | null {
   try {
-    if (op === 'get') return sessionStorage.getItem(key);
-    sessionStorage.setItem(key, value);
+    const saved: unknown = JSON.parse(localStorage.getItem(SECRET_KEY) ?? 'null');
+    if (typeof saved !== 'object' || saved === null) return null;
+    const { room, roundId: id, word, at } = saved as Record<string, unknown>;
+    const fresh = typeof at === 'number' && Date.now() - at < SECRET_MAX_AGE_MS;
+    return fresh && room === roomCode() && id === roundId && typeof word === 'string' ? word : null;
   } catch {
-    // Ignore: a reload will just lose the word.
+    return null;
   }
-  return null;
+}
+
+function forgetSecret(): void {
+  try {
+    localStorage.removeItem(SECRET_KEY);
+  } catch {
+    // Nothing to forget.
+  }
 }
