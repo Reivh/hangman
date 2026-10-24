@@ -1,6 +1,6 @@
 // Join screen for players who arrive after the game has launched and so never saw Playroom's lobby.
 import { randomAvatars } from './avatars';
-import { $ } from './dom';
+import { $, noteOverlayClosed } from './dom';
 
 const CHOICES = 8;
 
@@ -53,6 +53,7 @@ export function askProfile(current: { name: string; photo: string }): Promise<{ 
         return;
       }
       overlay.hidden = true;
+      noteOverlayClosed();
       nameInput.blur();
       resolve({ name, photo: selected });
     };

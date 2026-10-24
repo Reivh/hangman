@@ -9,15 +9,19 @@ Multiplayer Hangman for friends, in the browser or on a phone. Built with **Phas
    default Multiavatar icons Playroom uses). They're counted as a player once they've picked.
 2. The host taps **Start game**. Players take turns being the **word picker** (rotating each round).
    If a round gets stuck, the host can end it with **End round** (top right; asks first).
-3. The picker types a secret word or short phrase. Only they can see it.
+3. The picker types a secret word or short sentence. Only they can see it. Spaces, hyphens and the punctuation
+   `' . , ! ?` are shown to everyone from the start.
 4. Everyone else guesses letters (tap the on-screen keys or use a keyboard). With **2 or more guessers it's
    turn-based**: one guess each (letter or whole word), then the turn passes on, whether it was right or wrong.
    You can **Pass** your turn (no penalty), and the picker can skip someone's turn if they've wandered off. With a single guesser there are no turns.
-   Every wrong letter adds a part: base, pole, beam, brace, rope, head, body, arms, legs. That's **11 misses**.
-5. Guessers win if they reveal the word before the man is hung. You can also guess the whole word, but a wrong guess costs a part.
+   Every miss draws more of the gallows and the man: base, pole, beam, brace, rope, head, body, arms, legs.
+   The host picks the **difficulty** in the lobby: **Easy** allows 11 misses (one part each), **Normal** 8 and
+   **Hard** 6 (several parts per miss).
+5. Guessers win if they reveal the word before the man is hung. You can also guess the whole word (spaces and
+   punctuation are optional), but a wrong guess costs a miss.
 
 **Scoring:** +1 for each letter you reveal, +3 for solving it, and the picker gets +3 if he hangs.
-The host can turn on **Danish letters (ÆØÅ)** in the lobby.
+The host can turn on **Danish letters (ÆØÅ)** and set the difficulty in the lobby.
 
 ### Keeping the word secret
 

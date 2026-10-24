@@ -32,13 +32,9 @@
       #prompt-title, #join-form h2 { font-family: "Bodoni Moda", Georgia, serif; margin: 0 0 6px; font-size: 26px; }
       #prompt-hint, #join-form p { margin: 0 0 16px; color: #555; font-size: 15px; }
       #prompt-input, #join-name {
-        width: 100%; box-sizing: border-box; font-size: 22px; padding: 12px 14px; letter-spacing: 2px;
-        text-transform: uppercase; border: 3px solid #111; border-radius: 12px; outline: none;
+        width: 100%; box-sizing: border-box; font-size: 22px; padding: 12px 14px;
+        border: 3px solid #111; border-radius: 12px; outline: none;
       }
-      #prompt-input.masked { -webkit-text-security: disc; text-security: disc; }
-      #prompt-reveal-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 15px; }
-      #prompt-reveal-row[hidden] { display: none; }
-      #join-name { text-transform: none; letter-spacing: 0; }
       #join-avatars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0 8px; }
       #join-avatars button {
         padding: 4px; border: 3px solid transparent; border-radius: 50%; background: none; cursor: pointer;
@@ -77,8 +73,7 @@
         <h2 id="prompt-title"></h2>
         <p id="prompt-hint"></p>
         <input id="prompt-input" type="text" autocomplete="off" autocorrect="off"
-               autocapitalize="characters" spellcheck="false" enterkeyhint="done" />
-        <label id="prompt-reveal-row"><input id="prompt-reveal" type="checkbox" /> Show what I typed</label>
+               autocapitalize="off" spellcheck="false" enterkeyhint="done" />
         <p id="prompt-error" role="alert"></p>
         <div class="prompt-buttons">
           <button id="prompt-cancel" type="button">Cancel</button>

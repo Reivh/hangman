@@ -1,19 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DIFFICULTIES,
   MAX_WORD_LENGTH,
-  MAX_WRONG,
+  PARTS,
   applyLetter,
   applyPass,
   applyWordGuess,
   beginGuessing,
   mask,
   newRound,
+  maxWrong,
   nextInOrder,
   normalizeWord,
+  partsDrawn,
   syncTurn,
+  type Difficulty,
 } from './hangman';
 
-const start = (word: string, danish = false) => beginGuessing(newRound(1, 'chooser', danish), word);
+const start = (word: string, danish = false, difficulty: Difficulty = 'easy') =>
+  beginGuessing(newRound(1, 'chooser', danish, difficulty), word);
 
 describe('normalizeWord', () => {
   it('uppercases and collapses whitespace', () => {
@@ -27,6 +32,9 @@ describe('normalizeWord', () => {
     expect(normalizeWord('a'.repeat(MAX_WORD_LENGTH), false).ok).toBe(true);
     expect(normalizeWord('a'.repeat(MAX_WORD_LENGTH + 1), false).ok).toBe(false);
   });
+  it('allows punctuation for short sentences', () => {
+    expect(normalizeWord("i'm here. ok, go! why?", false)).toEqual({ ok: true, word: "I'M HERE. OK, GO! WHY?" });
+  });
   it('rejects digits and too-short words', () => {
     expect(normalizeWord('abc1', false).ok).toBe(false);
     expect(normalizeWord('a', false).ok).toBe(false);
@@ -34,8 +42,9 @@ describe('normalizeWord', () => {
 });
 
 describe('mask', () => {
-  it('hides unguessed letters but shows spaces and hyphens', () => {
+  it('hides unguessed letters but shows spaces, hyphens and punctuation', () => {
     expect(mask("X-RAY DON'T", ['A'])).toBe("_-_A_ ___'_");
+    expect(mask('HI, YOU. GO!?', [])).toBe('__, ___. __!?');
   });
 });
 
@@ -63,9 +72,9 @@ describe('applyLetter', () => {
     expect(res.points).toEqual({ p2: 1 + 3 });
   });
 
-  it('loses after MAX_WRONG misses and rewards the chooser', () => {
+  it('loses after the allowed misses and rewards the chooser', () => {
     let r = start('Q');
-    const misses = 'ABCDEFGHIJKLMNOP'.slice(0, MAX_WRONG);
+    const misses = 'ABCDEFGHIJKLMNOP'.slice(0, maxWrong('easy'));
     let last;
     for (const ch of misses) {
       last = applyLetter(r, 'QQ', ch, 'p1', 'Ann');
@@ -84,10 +93,46 @@ describe('applyWordGuess', () => {
     expect(res.round.status).toBe('won');
     expect(res.points).toEqual({ p1: 3 });
   });
+  it('ignores spaces and punctuation the guesser left out', () => {
+    const word = "HI, IT'S ME.";
+    expect(applyWordGuess(start(word), word, 'hi its me', 'p1', 'Ann').round.status).toBe('won');
+    expect(applyWordGuess(start(word), word, "hi, it's me.", 'p1', 'Ann').round.status).toBe('won');
+  });
+  it('treats the same letters with different punctuation as a repeat', () => {
+    const r = applyWordGuess(start('HELLO'), 'HELLO', 'HEL LA', 'p1', 'Ann').round;
+    expect(applyWordGuess(r, 'HELLO', 'HELLA!', 'p2', 'Bo').ignored).toBe(true);
+  });
   it('costs a part on a wrong guess', () => {
     const res = applyWordGuess(start('HELLO'), 'HELLO', 'HELLA', 'p1', 'Ann');
     expect(res.round.wrong).toBe(1);
     expect(res.round.wrongWords).toEqual(['HELLA']);
+  });
+});
+
+describe('difficulty', () => {
+  it('allows 11, 8 or 6 misses', () => {
+    expect(DIFFICULTIES).toEqual({ easy: 11, normal: 8, hard: 6 });
+    for (const d of ['easy', 'normal', 'hard'] as const) {
+      let r = start('QQ', false, d);
+      for (const ch of 'ABCDEFGHIJK'.slice(0, maxWrong(d))) {
+        expect(r.status).toBe('guessing');
+        r = applyLetter(r, 'QQ', ch, 'p1', 'Ann').round;
+      }
+      expect(r.status).toBe('lost');
+    }
+  });
+  it('falls back to normal on a bad value from another client', () => {
+    expect(maxWrong('impossible')).toBe(8);
+    expect(maxWrong(undefined)).toBe(8);
+  });
+  it('draws more parts per miss on harder levels, finishing the man on the last miss', () => {
+    for (const d of ['easy', 'normal', 'hard'] as const) {
+      const drawn = Array.from({ length: maxWrong(d) + 1 }, (_, wrong) => partsDrawn(d, wrong));
+      expect(drawn[0]).toBe(0);
+      expect(drawn.at(-1)).toBe(PARTS.length);
+      for (let i = 1; i < drawn.length; i++) expect(drawn[i]).toBeGreaterThan(drawn[i - 1]);
+    }
+    expect(partsDrawn('hard', 99)).toBe(PARTS.length);
   });
 });
 

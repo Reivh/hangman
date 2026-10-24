@@ -23,10 +23,13 @@ import {
   applyWordGuess,
   beginGuessing,
   canGuess,
+  DEFAULT_DIFFICULTY,
+  isDifficulty,
   MAX_WORD_LENGTH,
   newRound,
   nextInOrder,
   syncTurn,
+  type Difficulty,
   type GuessResult,
   type RoundState,
 } from '../logic/hangman';
@@ -68,7 +71,7 @@ export async function connect(): Promise<boolean> {
   await insertCoinOrFail({
     skipLobby,
     maxPlayersPerRoom: 12,
-    defaultStates: { round: null, scores: {}, danish: false },
+    defaultStates: { round: null, scores: {}, danish: false, difficulty: DEFAULT_DIFFICULTY },
     ...(gameId ? { gameId } : {}),
   });
 
@@ -128,6 +131,10 @@ export const roomCode = (): string => getRoomCode() ?? '';
 export const round = (): RoundState | null => getState('round') ?? null;
 export const scores = (): Record<string, number> => getState('scores') ?? {};
 export const danish = (): boolean => !!getState('danish');
+export function difficulty(): Difficulty {
+  const d: unknown = getState('difficulty');
+  return isDifficulty(d) ? d : DEFAULT_DIFFICULTY;
+}
 
 const isJoined = (p: PlayerState): boolean => !!p.getState('joined');
 
@@ -217,6 +224,10 @@ export function setDanish(on: boolean): void {
   if (amHost()) setState('danish', on, true);
 }
 
+export function setDifficulty(d: Difficulty): void {
+  if (amHost()) setState('difficulty', d, true);
+}
+
 export function startNextRound(): void {
   if (!amHost()) return;
   const ids = joinedIds();
@@ -224,7 +235,7 @@ export function startNextRound(): void {
   const prev = round();
   // Rotate the chooser through players in join order, carrying on after the last one even if they left.
   const chooserId = nextInOrder(joinOrder, ids, prev?.chooserId ?? null) ?? ids[0];
-  setState('round', newRound((prev?.id ?? 0) + 1, chooserId, danish()), true);
+  setState('round', newRound((prev?.id ?? 0) + 1, chooserId, danish(), difficulty()), true);
 }
 
 export function abandonRound(): void {

@@ -39,10 +39,11 @@ export function drawGallows(
   ox: number,
   oy: number,
   scale: number,
-  wrong: number,
+  /** How many of PARTS are inked in; the rest are dotted. */
+  drawn: number,
 ): void {
   PARTS.forEach((part, i) => {
-    const solid = i < wrong;
+    const solid = i < drawn;
     for (const s of SHAPES[part]) {
       if (solid) drawSolid(g, s, ox, oy, scale, part === 'base' && s === SHAPES.base[0] ? 7 : 5);
       else drawDotted(g, s, ox, oy, scale);

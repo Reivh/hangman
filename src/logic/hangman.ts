@@ -15,15 +15,45 @@ export const PARTS = [
   'legR',
 ] as const;
 export type Part = (typeof PARTS)[number];
-export const MAX_WRONG = PARTS.length;
+
+/** Allowed misses per difficulty. Harder levels draw several parts per miss. */
+export const DIFFICULTIES = { easy: 11, normal: 8, hard: 6 } as const;
+export type Difficulty = keyof typeof DIFFICULTIES;
+export const DEFAULT_DIFFICULTY: Difficulty = 'normal';
+
+export function isDifficulty(value: unknown): value is Difficulty {
+  return typeof value === 'string' && Object.hasOwn(DIFFICULTIES, value);
+}
+
+/** Misses allowed in a round. Round state comes from another client, so fall back on anything odd. */
+export function maxWrong(difficulty: unknown): number {
+  return DIFFICULTIES[isDifficulty(difficulty) ? difficulty : DEFAULT_DIFFICULTY];
+}
+
+/**
+ * How many parts are drawn after each miss (cumulative, index = misses - 1), grouped so each miss adds
+ * something that reads as one step: arms and legs go on in pairs before the gallows parts are merged.
+ */
+const STAGES: Record<Difficulty, readonly number[]> = {
+  easy: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  normal: [1, 2, 4, 5, 6, 7, 9, 11], // beam+brace, arms, legs
+  hard: [2, 5, 6, 7, 9, 11], // base+pole, beam+brace+rope, head, body, arms, legs
+};
+
+/** How many of PARTS to draw after `wrong` misses. */
+export function partsDrawn(difficulty: unknown, wrong: number): number {
+  if (wrong <= 0) return 0;
+  const stages = STAGES[isDifficulty(difficulty) ? difficulty : DEFAULT_DIFFICULTY];
+  return stages[Math.min(wrong, stages.length) - 1];
+}
 
 export const ALPHABET_EN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 export const ALPHABET_DA = [...ALPHABET_EN, 'Æ', 'Ø', 'Å'];
 export const HIDDEN = '_';
 /** Characters that are shown from the start and never guessed. */
-const SHOWN = new Set([' ', '-', "'"]);
+const SHOWN = new Set([' ', '-', "'", '.', ',', '!', '?']);
 
-/** Spaces, hyphens and apostrophes are shown from the start and never guessed. */
+/** Spaces, hyphens, apostrophes and punctuation are shown from the start and never guessed. */
 export const isShown = (ch: string): boolean => SHOWN.has(ch);
 export const MAX_WORD_LENGTH = 60;
 
@@ -47,6 +77,7 @@ export interface RoundState {
   id: number;
   chooserId: string;
   danish: boolean;
+  difficulty: Difficulty;
   status: RoundStatus;
   masked: string;
   guessed: string[];
@@ -80,15 +111,21 @@ export function normalizeWord(raw: string, danish: boolean): Normalized {
   return { ok: true, word };
 }
 
+/** Only the letters, so a whole-word guess doesn't have to repeat the spaces and punctuation. */
+export function lettersOf(word: string): string {
+  return [...word].filter((ch) => !SHOWN.has(ch)).join('');
+}
+
 export function mask(word: string, guessed: readonly string[]): string {
   return [...word].map((ch) => (SHOWN.has(ch) || guessed.includes(ch) ? ch : HIDDEN)).join('');
 }
 
-export function newRound(id: number, chooserId: string, danish: boolean): RoundState {
+export function newRound(id: number, chooserId: string, danish: boolean, difficulty: Difficulty): RoundState {
   return {
     id,
     chooserId,
     danish,
+    difficulty,
     status: 'choosing',
     masked: '',
     guessed: [],
@@ -167,7 +204,7 @@ function finish(round: RoundState, word: string, chooserId: string, points: Reco
   if (!round.masked.includes(HIDDEN)) {
     round.status = 'won';
     round.word = word;
-  } else if (round.wrong >= MAX_WRONG) {
+  } else if (round.wrong >= maxWrong(round.difficulty)) {
     round.status = 'lost';
     round.word = word;
     points[chooserId] = (points[chooserId] ?? 0) + POINTS.hanged;
@@ -217,10 +254,11 @@ export function applyWordGuess(
     return { round, points: {}, ignored: true };
   }
   const guess = normalized.word;
-  if (round.wrongWords.includes(guess)) return { round, points: {}, ignored: true };
+  const key = lettersOf(guess);
+  if (round.wrongWords.some((w) => lettersOf(w) === key)) return { round, points: {}, ignored: true };
   const next: RoundState = { ...round };
   const points: Record<string, number> = {};
-  const hit = guess === word;
+  const hit = key === lettersOf(word);
   if (hit) {
     next.masked = word;
     points[byId] = POINTS.solve;

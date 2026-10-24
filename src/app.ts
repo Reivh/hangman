@@ -2,12 +2,14 @@
 // a visit as soon as its code loads.
 import Phaser from 'phaser';
 import { connect, joinGame, myProfile } from './net/room';
+import { shieldOverlays } from './ui/dom';
 import { askProfile } from './ui/join';
 import { GameScene, HEIGHT, WIDTH } from './scenes/GameScene';
 
 export async function startGame(): Promise<void> {
   // Shows Playroom's lobby (room code, QR, names/avatars) and resolves once the game launches.
   const needsProfile = await connect();
+  shieldOverlays();
   // Start the game straight away, even behind the join screen: if Playroom hands this player the
   // host role while they're still picking a name, the host's jobs must keep running.
   new Phaser.Game({

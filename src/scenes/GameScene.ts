@@ -1,7 +1,20 @@
 import Phaser from 'phaser';
 import * as net from '../net/room';
 import { GALLOWS_W, drawGallows } from '../draw/gallows';
-import { HIDDEN, MAX_WRONG, alphabet, canGuess, isShown, normalizeWord, type RoundState } from '../logic/hangman';
+import {
+  DIFFICULTIES,
+  HIDDEN,
+  alphabet,
+  canGuess,
+  isShown,
+  lettersOf,
+  maxWrong,
+  normalizeWord,
+  partsDrawn,
+  type Difficulty,
+  type RoundState,
+} from '../logic/hangman';
+import { canvasInputBlocked } from '../ui/dom';
 import { closePrompt, isPromptOpen, openPrompt } from '../ui/prompt';
 import { LINE_SPACING, layoutWord } from './wordLayout';
 
@@ -22,6 +35,10 @@ const WORD_Y = 640;
 const KEYS_Y = 818;
 const BUTTON_Y = 1118;
 const BOX_Y = 1162;
+const SETTINGS_Y = 1044;
+
+const DIFFICULTY_NAMES: Record<Difficulty, string> = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
+const DIFFICULTY_ORDER = Object.keys(DIFFICULTIES) as Difficulty[];
 
 type TextStyle = Phaser.Types.GameObjects.Text.TextStyle;
 
@@ -64,6 +81,7 @@ export class GameScene extends Phaser.Scene {
       net.joiningCount(),
       net.amHost(),
       net.danish(),
+      net.difficulty(),
       net.mySecret() !== null,
       [...this.pending],
     ]);
@@ -97,7 +115,7 @@ export class GameScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.ui.add(g);
     const gx = (WIDTH - GALLOWS_W * GALLOWS_SCALE) / 2;
-    drawGallows(g, gx, GALLOWS_Y, GALLOWS_SCALE, round?.wrong ?? 0);
+    drawGallows(g, gx, GALLOWS_Y, GALLOWS_SCALE, round ? partsDrawn(round.difficulty, round.wrong) : 0);
 
     if (!round) this.renderLobby();
     else if (round.status === 'choosing') this.renderChoosing(round, meId);
@@ -117,7 +135,9 @@ export class GameScene extends Phaser.Scene {
       fontSize: '20px',
       color: '#777',
     });
-    invite.setInteractive({ useHandCursor: true }).on('pointerup', () => shareLink(code));
+    invite.setInteractive({ useHandCursor: true }).on('pointerup', () => {
+      if (!canvasInputBlocked()) void shareLink(code);
+    });
 
     let status = 'Waiting in the lobby';
     if (round) {
@@ -136,30 +156,36 @@ export class GameScene extends Phaser.Scene {
       'Players take turns picking a secret word.\nEveryone else guesses letters before the man is hung.',
       { fontFamily: SANS, fontSize: '22px', color: '#444', align: 'center', lineSpacing: 6 },
     );
-    this.renderRules();
+    const danish = net.danish();
+    const difficulty = net.difficulty();
+    this.renderRules(difficulty, KEYS_Y + 62);
 
+    const level = `${DIFFICULTY_NAMES[difficulty]} (${maxWrong(difficulty)} misses)`;
     if (net.amHost()) {
-      const danish = net.danish();
-      this.button(WIDTH / 2 - 170, BUTTON_Y, 300, `Danish ÆØÅ: ${danish ? 'ON' : 'OFF'}`, true, () =>
+      this.button(WIDTH / 2 - 170, SETTINGS_Y, 300, `Danish ÆØÅ: ${danish ? 'ON' : 'OFF'}`, true, () =>
         net.setDanish(!danish),
+        true,
       );
-      this.button(WIDTH / 2 + 170, BUTTON_Y, 300, count < 2 ? 'Need 2+ players' : 'Start game', count >= 2, () =>
+      const next = DIFFICULTY_ORDER[(DIFFICULTY_ORDER.indexOf(difficulty) + 1) % DIFFICULTY_ORDER.length];
+      this.button(WIDTH / 2 + 170, SETTINGS_Y, 300, level, true, () => net.setDifficulty(next), true);
+      this.button(WIDTH / 2, BUTTON_Y, 400, count < 2 ? 'Need 2+ players' : 'Start game', count >= 2, () =>
         net.startNextRound(),
       );
     } else {
+      this.note(SETTINGS_Y, `${level} · Danish ÆØÅ ${danish ? 'on' : 'off'}`);
       this.note(BUTTON_Y, 'Waiting for the host to start…');
     }
   }
 
-  private renderRules(): void {
+  private renderRules(difficulty: Difficulty, y = KEYS_Y + 120): void {
     const lines = [
-      `• Every wrong letter adds a part — ${MAX_WRONG} misses and he's hung.`,
+      `• Every miss draws more of him — ${maxWrong(difficulty)} misses and he's hung.`,
       '• Correct letter: +1 per letter revealed. Solve it: +3.',
       '• With 2+ guessers you take turns: one guess each, or Pass.',
-      '• Guess the whole word on your go, but a wrong guess costs a part.',
+      '• Guess the whole word on your go, but a wrong guess costs a miss.',
       '• If he hangs, the word-picker gets +3.',
     ];
-    this.text(WIDTH / 2, KEYS_Y + 120, lines.join('\n'), {
+    this.text(WIDTH / 2, y, lines.join('\n'), {
       fontFamily: SANS,
       fontSize: '21px',
       color: '#555',
@@ -181,7 +207,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: SERIF,
         fontSize: '34px',
       });
-      this.renderRules();
+      this.renderRules(round.difficulty);
     }
   }
 
@@ -198,7 +224,7 @@ export class GameScene extends Phaser.Scene {
     if (!over && round.turnId) {
       turn = round.turnId === meId ? ' · Your turn!' : ` · ${net.playerName(round.turnId)}'s turn`;
     }
-    this.text(WIDTH / 2, 756, `Misses ${round.wrong} / ${MAX_WRONG}${turn}${wrongWords}`, {
+    this.text(WIDTH / 2, 756, `Misses ${round.wrong} / ${maxWrong(round.difficulty)}${turn}${wrongWords}`, {
       fontFamily: SANS,
       fontSize: '22px',
       color: '#333',
@@ -467,6 +493,7 @@ export class GameScene extends Phaser.Scene {
   // ---- Actions ----------------------------------------------------------------
 
   private tryGuessLetter(letter: string): void {
+    if (canvasInputBlocked()) return;
     const round = net.round();
     if (!round || !canGuess(round, net.me())) return;
     if (!alphabet(round.danish).includes(letter) || round.guessed.includes(letter) || this.pending.has(letter)) return;
@@ -480,12 +507,9 @@ export class GameScene extends Phaser.Scene {
     this.promptContext = contextOf(round);
     openPrompt({
       title: 'Pick a secret word',
-      hint: round.danish
-        ? 'A word or short phrase. Letters A–Z and ÆØÅ, spaces and hyphens.'
-        : 'A word or short phrase. Letters A–Z, spaces and hyphens.',
+      hint: `A word or short sentence. Letters ${round.danish ? 'A–Z and ÆØÅ' : 'A–Z'}; spaces, hyphens and . , ! ? ' are shown to everyone.`,
       placeholder: 'e.g. lighthouse',
       submitLabel: 'Hide it!',
-      secret: true,
       validate: (v) => {
         const n = normalizeWord(v, round.danish);
         return n.ok ? null : n.error;
@@ -502,14 +526,16 @@ export class GameScene extends Phaser.Scene {
     this.promptContext = contextOf(round);
     openPrompt({
       title: 'Guess the whole word',
-      hint: `Careful — a wrong guess adds a part. (${round.masked.replaceAll(HIDDEN, '_ ')})`,
+      hint: `Careful — a wrong guess costs a miss. (${round.masked.replaceAll(HIDDEN, '_ ')})`,
       placeholder: 'Your guess',
       submitLabel: 'Guess',
-      secret: false,
       validate: (v) => {
         const n = normalizeWord(v, round.danish);
         if (!n.ok) return n.error;
-        return n.word.length === round.masked.length ? null : `It has ${round.masked.length} characters.`;
+        // Spaces and punctuation are optional, so only the letters have to add up.
+        const want = lettersOf(round.masked).length;
+        const got = lettersOf(n.word).length;
+        return got === want ? null : `It has ${want} letters; you typed ${got}.`;
       },
       onSubmit: (v) => {
         this.promptContext = null;
@@ -561,7 +587,7 @@ export class GameScene extends Phaser.Scene {
         .on('pointerout', () => rect.setScale(1))
         .on('pointerup', () => {
           rect.setScale(1);
-          onClick();
+          if (!canvasInputBlocked()) onClick();
         });
     }
   }
