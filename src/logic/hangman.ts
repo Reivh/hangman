@@ -25,9 +25,19 @@ export function isDifficulty(value: unknown): value is Difficulty {
   return typeof value === 'string' && Object.hasOwn(DIFFICULTIES, value);
 }
 
-/** Misses allowed in a round. Round state comes from another client, so fall back on anything odd. */
+/**
+ * A round's difficulty. Round state comes from another client, so fall back on anything odd. Rounds
+ * started by a build from before difficulty levels (still open somewhere during a release) have none
+ * and allow 11 misses, so treat those as easy.
+ */
+function difficultyOf(value: unknown): Difficulty {
+  if (isDifficulty(value)) return value;
+  return value === undefined ? 'easy' : DEFAULT_DIFFICULTY;
+}
+
+/** Misses allowed in a round. */
 export function maxWrong(difficulty: unknown): number {
-  return DIFFICULTIES[isDifficulty(difficulty) ? difficulty : DEFAULT_DIFFICULTY];
+  return DIFFICULTIES[difficultyOf(difficulty)];
 }
 
 /**
@@ -43,7 +53,7 @@ const STAGES: Record<Difficulty, readonly number[]> = {
 /** How many of PARTS to draw after `wrong` misses. */
 export function partsDrawn(difficulty: unknown, wrong: number): number {
   if (wrong <= 0) return 0;
-  const stages = STAGES[isDifficulty(difficulty) ? difficulty : DEFAULT_DIFFICULTY];
+  const stages = STAGES[difficultyOf(difficulty)];
   return stages[Math.min(wrong, stages.length) - 1];
 }
 

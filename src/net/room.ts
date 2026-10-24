@@ -136,8 +136,8 @@ export function keepMeJoined(): void {
   if (!self.joined) return;
   const player = myPlayer();
   const profile = rawProfile(player);
-  const name = typeof profile.name === 'string' && profile.name.trim() ? profile.name : null;
-  if (name && player.getState('joined')) {
+  const name = hasName(profile) ? profile.name : null;
+  if (name) {
     const photo = safePhoto(profile.photo);
     const color = typeof profile.color === 'string' ? profile.color : '';
     const known = self.profile;
@@ -145,14 +145,18 @@ export function keepMeJoined(): void {
       self = { ...self, profile: { name, photo, color } };
       saveSelf(self);
     }
-    return;
   }
+  const lostProfile = !name && self.profile !== null;
+  const lostJoined = !player.getState('joined');
   // Wait a moment between repairs, so the host's copy can catch up.
-  if (performance.now() - lastRepair < 1000) return;
+  if ((!lostProfile && !lostJoined) || performance.now() - lastRepair < 1000) return;
   lastRepair = performance.now();
-  if (!name && self.profile) player.setState('profile', { ...profile, ...self.profile }, true);
-  player.setState('joined', true, true);
-  saveSelf(self);
+  if (lostProfile) player.setState('profile', { ...profile, ...self.profile }, true);
+  if (lostJoined) player.setState('joined', true, true);
+}
+
+function hasName(profile: Record<string, unknown>): profile is Record<string, unknown> & { name: string } {
+  return typeof profile.name === 'string' && profile.name.trim() !== '';
 }
 
 /** insertCoin, but also rejecting when Playroom reports an error through its callback. */
@@ -242,7 +246,10 @@ function currentRoster(): Roster {
       joining: all.filter((p) => !isJoined(p)).length,
     };
     for (const p of roster.joined) knownNames.set(p.id, p.name);
-    for (const p of all) if (isJoined(p)) knownProfiles.set(p.id, rawProfile(p));
+    for (const p of all) {
+      const profile = rawProfile(p);
+      if (isJoined(p) && hasName(profile)) knownProfiles.set(p.id, profile);
+    }
     queueMicrotask(() => (roster = null));
   }
   return roster;
@@ -326,17 +333,16 @@ export function hostWatchdog(): void {
 
 /**
  * When a player's connection drops, the host drops their player state, and when they reconnect it
- * starts again empty: no `joined` flag (so they show as "+1 joining" and get no turns) and sometimes
- * not the profile they picked. Their own browser doesn't notice, since its copy still has both, so the
- * host puts back what it remembers of anyone it has seen in the game before.
+ * starts again empty: no `joined` flag (so they show as "+1 joining" and get no turns) and possibly no
+ * profile. Their own browser doesn't notice, since its copy still has both, so the host puts back what it
+ * remembers of anyone it has seen in the game before.
  */
 function restoreReturningPlayers(): void {
   for (const p of players.values()) {
     const known = knownProfiles.get(p.id);
-    if (!known || isJoined(p)) continue;
-    const profile = rawProfile(p);
-    if (profile.name !== known.name || profile.photo !== known.photo) p.setState('profile', known, true);
-    p.setState('joined', true, true);
+    if (!known) continue;
+    if (!hasName(rawProfile(p))) p.setState('profile', known, true);
+    if (!isJoined(p)) p.setState('joined', true, true);
   }
 }
 

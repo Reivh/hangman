@@ -46,9 +46,13 @@ export function loadSelf(room: string): Self | null {
   return self?.room === room ? self : null;
 }
 
-/** Remember this tab's player, and back it up for other tabs. Call when it changes. */
+/**
+ * Remember this tab's player, and back it up for other tabs once they've joined. A tab that hasn't
+ * joined (e.g. a second tab that had to become a new player) mustn't replace a real player's backup.
+ */
 export function saveSelf(self: Self): void {
   write(sessionStorage, SELF_KEY, JSON.stringify(self));
+  if (!self.joined) return;
   const playroom: Record<string, string> = {};
   for (const key of PLAYROOM_KEYS) {
     const value = read(sessionStorage, key);
@@ -58,20 +62,35 @@ export function saveSelf(self: Self): void {
 }
 
 /**
- * In a fresh tab opening the same room as the saved identity, give Playroom that identity back.
- * Must run before insertCoin(). Skipped when another tab still holds that player (see holdPlayer).
+ * Must run before insertCoin(). In a fresh tab opening the same room as the saved identity, gives Playroom
+ * that identity back, unless another open tab is still that player (see holdPlayer). A tab that already
+ * has an identity but shares it with another open tab (a duplicated tab copies sessionStorage) drops it,
+ * so Playroom makes it a new player.
  */
 export async function adoptSavedIdentity(): Promise<void> {
+  const current = read(sessionStorage, 'myId');
+  if (current !== null) {
+    if (await heldElsewhere(current)) for (const key of [...PLAYROOM_KEYS, SELF_KEY]) remove(sessionStorage, key);
+    return;
+  }
   const room = linkRoom();
-  if (!room || read(sessionStorage, 'myId') !== null) return; // New room, or this tab already has an id.
   const saved = parse<Saved>(read(localStorage, SAVED_KEY));
-  const id = saved?.playroom.myId;
-  if (!saved || !id || saved.self?.room !== room || Date.now() - saved.at > MAX_AGE_MS) return;
-  if (!('locks' in navigator)) return; // Can't tell whether another tab is this player, so don't risk it.
-  const { held = [] } = await navigator.locks.query();
-  if (held.some((lock) => lock.name === lockName(id))) return;
-  for (const [key, value] of Object.entries(saved.playroom)) write(sessionStorage, key, value);
+  const id = saved?.playroom?.myId;
+  if (!room || !saved || typeof id !== 'string' || saved.self?.room !== room) return;
+  if (typeof saved.at !== 'number' || Date.now() - saved.at > MAX_AGE_MS) return;
+  // Without Web Locks we can't tell whether another tab is this player, so don't risk it.
+  if (!('locks' in navigator) || (await heldElsewhere(id))) return;
+  for (const [key, value] of Object.entries(saved.playroom)) {
+    if (PLAYROOM_KEYS.includes(key) && typeof value === 'string') write(sessionStorage, key, value);
+  }
   write(sessionStorage, SELF_KEY, JSON.stringify(saved.self));
+}
+
+/** Whether another open tab is this player. This tab only takes the lock once it has connected. */
+async function heldElsewhere(id: string): Promise<boolean> {
+  if (!('locks' in navigator)) return false;
+  const { held = [] } = await navigator.locks.query();
+  return held.some((lock) => lock.name === lockName(id));
 }
 
 /** Mark this player as taken by this tab for as long as it's open. */
@@ -96,6 +115,14 @@ function read(storage: Storage, key: string): string | null {
     return storage.getItem(key);
   } catch {
     return null;
+  }
+}
+
+function remove(storage: Storage, key: string): void {
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Ignore.
   }
 }
 

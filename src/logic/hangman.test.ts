@@ -123,7 +123,11 @@ describe('difficulty', () => {
   });
   it('falls back to normal on a bad value from another client', () => {
     expect(maxWrong('impossible')).toBe(8);
-    expect(maxWrong(undefined)).toBe(8);
+    expect(maxWrong(null)).toBe(8);
+  });
+  it('treats rounds from builds without difficulty levels as easy (11 misses)', () => {
+    expect(maxWrong(undefined)).toBe(11);
+    expect(partsDrawn(undefined, 3)).toBe(3);
   });
   it('draws more parts per miss on harder levels, finishing the man on the last miss', () => {
     for (const d of ['easy', 'normal', 'hard'] as const) {

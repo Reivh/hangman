@@ -40,9 +40,14 @@ export async function startGame(): Promise<void> {
 function keepScreenOn(): void {
   if (!('wakeLock' in navigator)) return;
   let lock: WakeLockSentinel | null = null;
+  let asking = false;
   const request = () => {
-    if (document.visibilityState !== 'visible' || (lock && !lock.released)) return;
-    navigator.wakeLock.request('screen').then((l) => (lock = l), () => {});
+    if (asking || document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+    asking = true;
+    navigator.wakeLock
+      .request('screen')
+      .then((l) => (lock = l), () => {})
+      .finally(() => (asking = false));
   };
   request();
   document.addEventListener('visibilitychange', request);

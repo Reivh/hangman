@@ -34,7 +34,8 @@ Run `npx tsc` and `npm test` before committing.
   other players' browsers. Validate shape and size, render text in the canvas or via `textContent` (never as
   HTML), and only accept `data:image/` avatars.
 - **Game rules stay pure:** `src/logic/` has no Playroom or Phaser imports, so it can be unit-tested. Put rule
-  changes there with tests; `src/net/room.ts` is the only module that talks to Playroom.
+  changes there with tests; `src/net/room.ts` is the only module that talks to Playroom (besides
+  `src/net/identity.ts`, which copies Playroom's sessionStorage keys and must load before it).
 - **Rendering:** `GameScene` rebuilds its UI whenever a snapshot of the shared state changes. Text input uses
   the HTML dialogs in `src/ui/` so phones get a native keyboard.
 
@@ -57,7 +58,7 @@ Run `npx tsc` and `npm test` before committing.
   (`restoreReturningPlayers`). Without that they show as "+1 joining" and get no turns.
 - Phones drop the connection when they sleep. `reconnectGracePeriod` makes the server hold a dropped player's
   seat for a minute; Playroom itself only retries a few times, then reloads the page. After the server lets
-  a word picker go, the host waits another 2 minutes before ending their round. The game also keeps the
+  a word picker go, the host waits another 2 minutes before ending their round (about 3 minutes in all). The game also keeps the
   screen awake with the Wake Lock API.
 - Playroom's lobby only runs before launch; late joiners get our own join screen (`src/ui/join.ts`).
 

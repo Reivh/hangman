@@ -27,8 +27,9 @@ The host can turn on **Danish letters (ÆØÅ)** and set the difficulty in the l
 
 Playroom's shared state is visible to every client, so the word is **never** put there. It stays only in the
 picker's browser. Guesses are sent by RPC, and the picker's client checks them and publishes just the masked word
-(`_ A N _`). The full word is only shared once the round ends. If the picker leaves for more than two minutes, the
-host's client ends the round.
+(`_ A N _`). The full word is only shared once the round ends. If the picker leaves for good, the host's client ends the
+round after about three minutes (the server holds their seat for a minute, then the host waits two more), so
+a phone that went to sleep has time to come back.
 
 ## Development
 
