@@ -70,6 +70,7 @@ The game is published to **GitHub Pages** at <https://reivh.github.io/hangman/>.
 | `src/logic/hangman.ts` | Pure rules: normalising words, masking, applying guesses, win/lose, points |
 | `src/net/room.ts` | Playroom glue: lobby, shared state, RPC, who's allowed to do what |
 | `src/net/identity.ts` | Keeps a player's seat across reloads and reopened invite links |
+| `src/net/storage.ts` | Safe localStorage/sessionStorage helpers |
 | `src/scenes/GameScene.ts` | Phaser scene: renders lobby / choosing / guessing / results |
 | `src/scenes/wordLayout.ts` | Fits the hidden word on screen (line wrapping, letter size) |
 | `src/draw/gallows.ts` | The gallows drawing (dotted outline, filled in on each miss) |

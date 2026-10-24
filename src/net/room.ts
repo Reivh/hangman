@@ -34,7 +34,8 @@ import {
   type RoundState,
 } from '../logic/hangman';
 import { skipLobby } from '../dev';
-import { adoptSavedIdentity, holdPlayer, loadSelf, saveSelf, type Self } from './identity';
+import { adoptSavedIdentity, holdPlayer, loadSelf, saveSelf, type Profile, type Self } from './identity';
+import { GAME_NIGHT_MS, readObject, write } from './storage';
 
 export interface Player {
   id: string;
@@ -54,7 +55,7 @@ const joinOrder: string[] = [];
 /** Last known display names, so a player who dropped out can still be named. */
 const knownNames = new Map<string, string>();
 /** Profiles of everyone seen in the game this session, so the host can put back what a reconnect loses. */
-const knownProfiles = new Map<string, Record<string, unknown>>();
+const knownProfiles = new Map<string, Profile>();
 /** word is null when this device has no copy of the round's word (cached so storage isn't re-read). */
 let secret: { roundId: number; word: string | null; forgotten: boolean } | null = null;
 
@@ -66,7 +67,7 @@ const CHOOSER_GRACE_MS = 120_000;
 let chooserGoneSince: number | null = null;
 
 /** This player, as remembered by this tab (see keepMeJoined). */
-let self: Self = { room: '', joined: false, profile: null };
+let self: Self = { room: '', id: '', joined: false, profile: null };
 
 /**
  * Joins (or creates) the room. Resolves to true when this player still has to pick a name and icon:
@@ -106,7 +107,7 @@ export async function connect(): Promise<boolean> {
   }
   const player = myPlayer();
   holdPlayer(player.id);
-  self = loadSelf(roomCode()) ?? { room: roomCode(), joined: false, profile: null };
+  self = loadSelf(roomCode(), player.id) ?? { room: roomCode(), id: player.id, joined: false, profile: null };
   // Dev shortcut, or coming back after a reload or in a new tab.
   if (skipLobby || self.joined || player.getState('joined')) {
     markJoined();
@@ -135,28 +136,28 @@ let lastRepair = -Infinity;
 export function keepMeJoined(): void {
   if (!self.joined) return;
   const player = myPlayer();
-  const profile = rawProfile(player);
-  const name = hasName(profile) ? profile.name : null;
-  if (name) {
-    const photo = safePhoto(profile.photo);
-    const color = typeof profile.color === 'string' ? profile.color : '';
+  const profile = checkedProfile(player);
+  if (profile) {
     const known = self.profile;
-    if (known?.name !== name || known.photo !== photo || known.color !== color) {
-      self = { ...self, profile: { name, photo, color } };
+    if (known?.name !== profile.name || known.photo !== profile.photo || known.color !== profile.color) {
+      self = { ...self, profile };
       saveSelf(self);
     }
   }
-  const lostProfile = !name && self.profile !== null;
+  const lostProfile = !profile && self.profile !== null;
   const lostJoined = !player.getState('joined');
   // Wait a moment between repairs, so the host's copy can catch up.
   if ((!lostProfile && !lostJoined) || performance.now() - lastRepair < 1000) return;
   lastRepair = performance.now();
-  if (lostProfile) player.setState('profile', { ...profile, ...self.profile }, true);
+  if (lostProfile) player.setState('profile', { ...rawProfile(player), ...self.profile }, true);
   if (lostJoined) player.setState('joined', true, true);
 }
 
-function hasName(profile: Record<string, unknown>): profile is Record<string, unknown> & { name: string } {
-  return typeof profile.name === 'string' && profile.name.trim() !== '';
+/** A player's profile with each field checked, or null if it has no name. */
+function checkedProfile(p: PlayerState): Profile | null {
+  const { name, photo } = rawProfile(p);
+  if (typeof name !== 'string' || !name.trim()) return null;
+  return { name: name.trim().slice(0, MAX_NAME_LENGTH), photo: safePhoto(photo), color: displayColor(p) };
 }
 
 /** insertCoin, but also rejecting when Playroom reports an error through its callback. */
@@ -237,19 +238,14 @@ function currentRoster(): Roster {
   if (!roster) {
     const all = [...players.values()];
     roster = {
-      joined: all.filter(isJoined).map((p) => ({
-        id: p.id,
-        name: displayName(p),
-        color: displayColor(p),
-        photo: safePhoto(rawProfile(p).photo),
-      })),
+      joined: all.filter(isJoined).map((p) => {
+        const profile = checkedProfile(p);
+        if (profile) knownProfiles.set(p.id, profile);
+        return { id: p.id, name: displayName(p), color: displayColor(p), photo: safePhoto(rawProfile(p).photo) };
+      }),
       joining: all.filter((p) => !isJoined(p)).length,
     };
     for (const p of roster.joined) knownNames.set(p.id, p.name);
-    for (const p of all) {
-      const profile = rawProfile(p);
-      if (isJoined(p) && hasName(profile)) knownProfiles.set(p.id, profile);
-    }
     queueMicrotask(() => (roster = null));
   }
   return roster;
@@ -341,7 +337,7 @@ function restoreReturningPlayers(): void {
   for (const p of players.values()) {
     const known = knownProfiles.get(p.id);
     if (!known) continue;
-    if (!hasName(rawProfile(p))) p.setState('profile', known, true);
+    if (!checkedProfile(p)) p.setState('profile', { ...known }, true);
     if (!isJoined(p)) p.setState('joined', true, true);
   }
 }
@@ -408,35 +404,33 @@ export function guess(kind: GuessPayload['kind'], value: string): void {
   RPC.call('guess', { kind, value } satisfies GuessPayload, RPC.Mode.OTHERS);
 }
 
-/** Only the latest word is kept: one per browser is all a word picker needs. */
-const SECRET_KEY = 'hangman:secret';
-/** A stored word older than this belongs to an old game night. */
-const SECRET_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+/** Words by room code. A browser only needs the word of the round it's picking for in each room. */
+const SECRET_KEY = 'hangman:secrets';
+
+function storedSecrets(): Record<string, unknown> {
+  return readObject('local', SECRET_KEY) ?? {};
+}
 
 function storeSecret(roundId: number, word: string): void {
-  try {
-    localStorage.setItem(SECRET_KEY, JSON.stringify({ room: roomCode(), roundId, word, at: Date.now() }));
-  } catch {
-    // Storage can throw in private mode or embedded webviews. A reload will just lose the word.
-  }
+  // Drop words from old game nights while we're here.
+  const kept = Object.entries(storedSecrets()).filter(([, entry]) => freshEntry(entry));
+  write('local', SECRET_KEY, JSON.stringify({ ...Object.fromEntries(kept), [roomCode()]: { roundId, word, at: Date.now() } }));
 }
 
 function loadSecret(roundId: number): string | null {
-  try {
-    const saved: unknown = JSON.parse(localStorage.getItem(SECRET_KEY) ?? 'null');
-    if (typeof saved !== 'object' || saved === null) return null;
-    const { room, roundId: id, word, at } = saved as Record<string, unknown>;
-    const fresh = typeof at === 'number' && Date.now() - at < SECRET_MAX_AGE_MS;
-    return fresh && room === roomCode() && id === roundId && typeof word === 'string' ? word : null;
-  } catch {
-    return null;
-  }
+  const entry = storedSecrets()[roomCode()];
+  if (!freshEntry(entry)) return null;
+  const { roundId: id, word } = entry as Record<string, unknown>;
+  return id === roundId && typeof word === 'string' ? word : null;
 }
 
 function forgetSecret(): void {
-  try {
-    localStorage.removeItem(SECRET_KEY);
-  } catch {
-    // Nothing to forget.
-  }
+  const { [roomCode()]: _gone, ...rest } = storedSecrets();
+  write('local', SECRET_KEY, JSON.stringify(rest));
+}
+
+function freshEntry(entry: unknown): boolean {
+  if (typeof entry !== 'object' || entry === null) return false;
+  const { at } = entry as Record<string, unknown>;
+  return typeof at === 'number' && Date.now() - at < GAME_NIGHT_MS;
 }
