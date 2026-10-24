@@ -42,7 +42,14 @@ export function linkRoom(): string | null {
 export async function returningToLinkedRoom(): Promise<boolean> {
   const room = linkRoom();
   const self = room ? loadSelf(room, null) : null;
-  return !!self && !(await heldElsewhere(self.id));
+  if (!self) return false;
+  // On a reload the old page may hold the lock a moment longer, so give it time to let go.
+  const until = performance.now() + LOCK_WAIT_MS;
+  while (await heldElsewhere(self.id)) {
+    if (performance.now() > until) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return true;
 }
 
 /** What this tab knows about its player in `room` (and with that id, if given). */
@@ -101,26 +108,35 @@ export function holdPlayer(id: string): void {
 
 const lockName = (id: string): string => `hangman:player:${id}`;
 const claimed = new Set<string>();
+/**
+ * How long to wait for another page to let go of a player. On a reload (or a tab closed just before the
+ * link is reopened) the old page can still hold the lock for a moment; a tab that's really still open
+ * holds it for good, and this tab becomes a new player after the wait.
+ */
+const LOCK_WAIT_MS = 2000;
 
 /**
- * Take the player's lock and keep it while this tab is open; false if another tab has it. Checking and
- * taking happen in one step, so two tabs opened at once can't both become the same player.
+ * Take the player's lock and keep it while this tab is open; false if another tab still has it after
+ * LOCK_WAIT_MS. Checking and taking happen in one step, so two tabs opened at once can't both become
+ * the same player.
  */
 function claimPlayer(id: string, withoutLocks: boolean): Promise<boolean> {
   if (claimed.has(id)) return Promise.resolve(true);
   if (!('locks' in navigator)) return Promise.resolve(withoutLocks);
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), LOCK_WAIT_MS);
   return new Promise((resolve) => {
     navigator.locks
-      .request(lockName(id), { ifAvailable: true }, (lock) => {
-        if (!lock) {
-          resolve(false);
-          return;
-        }
+      .request(lockName(id), { signal: abort.signal }, () => {
+        clearTimeout(timer);
         claimed.add(id);
         resolve(true);
         return new Promise<void>(() => {}); // Never settles, so the lock is held until the tab closes.
       })
-      .catch(() => resolve(withoutLocks));
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(abort.signal.aborted ? false : withoutLocks);
+      });
   });
 }
 
